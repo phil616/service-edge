@@ -131,11 +131,21 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 	return nil, fmt.Errorf("unknown agent type %q", agentType)
 }
 
+// normalizeFrpVersion ensures the version string has a "v" prefix (the frp binary
+// outputs "0.61.1", but GitHub release tags use "v0.61.1").
+func normalizeFrpVersion(version string) string {
+	if version != "" && !strings.HasPrefix(version, "v") {
+		return "v" + version
+	}
+	return version
+}
+
 // frpBinary builds the release download descriptor for a version/os/arch.
 func (s *Service) frpBinary(version, osName, arch string) protocol.FrpBinary {
-	v := strings.TrimPrefix(version, "v")
+	tag := normalizeFrpVersion(version) // always v-prefixed for the URL path
+	v := strings.TrimPrefix(tag, "v")
 	file := fmt.Sprintf("frp_%s_%s_%s.tar.gz", v, osName, arch)
-	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), version, file)
+	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), tag, file)
 	return protocol.FrpBinary{Version: version, DownloadURL: url}
 }
 
@@ -160,7 +170,7 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 		return err
 	}
 	if req.FrpVersion != "" {
-		s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).Update("frp_version", req.FrpVersion)
+		s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).Update("frp_version", normalizeFrpVersion(req.FrpVersion))
 	}
 	return nil
 }

@@ -28,7 +28,9 @@ esac
 mkdir -p "$INSTALL_DIR"/{bin,config,data,logs}
 
 FRP_TARBALL="frp_${FRP_VERSION#v}_linux_${FRP_ARCH}.tar.gz"
-FRP_URL="${FRP_BASE_URL}/${FRP_VERSION}/${FRP_TARBALL}"
+FRP_TAG="${FRP_VERSION}"
+[[ "$FRP_TAG" != v* ]] && FRP_TAG="v${FRP_TAG}"
+FRP_URL="${FRP_BASE_URL}/${FRP_TAG}/${FRP_TARBALL}"
 echo "Downloading frps: $FRP_URL"
 curl -fSL "$FRP_URL" -o /tmp/frp.tar.gz
 tar -xzf /tmp/frp.tar.gz -C /tmp/
@@ -36,8 +38,9 @@ cp /tmp/frp_*/frps "$INSTALL_DIR/bin/frps"
 chmod +x "$INSTALL_DIR/bin/frps"
 rm -rf /tmp/frp.tar.gz /tmp/frp_*
 
-echo "Downloading agent: $AGENT_DOWNLOAD_URL"
-curl -fSL "$AGENT_DOWNLOAD_URL" -o "$INSTALL_DIR/bin/agent"
+AGENT_URL="${AGENT_DOWNLOAD_URL}_linux_${FRP_ARCH}"
+echo "Downloading agent: $AGENT_URL"
+curl -fSL "$AGENT_URL" -o "$INSTALL_DIR/bin/agent"
 chmod +x "$INSTALL_DIR/bin/agent"
 
 cat > "$INSTALL_DIR/config/agent.yaml" <<EOF
