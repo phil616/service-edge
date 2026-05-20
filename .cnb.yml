@@ -64,7 +64,7 @@ main:
               docker run -d --name service-edge \
                 --pull=always \
                 --restart unless-stopped \
-                -p 5008:5008 \
+                -p 5009:5009 \
                 -v /etc/service-edge:/etc/service-edge:ro \
                 -v /var/lib/service-edge:/var/lib/service-edge \
                 -e BUILD_SHA="${CNB_COMMIT}" \
