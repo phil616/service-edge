@@ -13,7 +13,10 @@ export default function FRPSList() {
   const { data, isLoading } = useQuery({ queryKey: ['frps'], queryFn: listFRPS })
   const del = useMutation({
     mutationFn: deleteFRPS,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['frps'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['frps'] })
+      qc.invalidateQueries({ queryKey: ['topology'] })
+    },
   })
 
   const columns = [

@@ -75,6 +75,9 @@ func NewRouter(o Options) *gin.Engine {
 		authed.GET("/ca", o.Handler.CAInfo)
 		authed.GET("/topology", o.Handler.Topology)
 
+		authed.GET("/settings", o.Handler.GetSettings)
+		authed.PUT("/settings", o.Handler.UpdateSettings)
+
 		authed.GET("/audit-logs", o.Handler.ListAuditLogs)
 	}
 

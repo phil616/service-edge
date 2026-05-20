@@ -14,7 +14,10 @@ export default function FRPCList() {
   const { data: nodes } = useQuery({ queryKey: ['frps'], queryFn: listFRPS })
   const del = useMutation({
     mutationFn: deleteFRPC,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['frpc'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['frpc'] })
+      qc.invalidateQueries({ queryKey: ['topology'] })
+    },
   })
 
   const nodeName = (uuid: string) => nodes?.find((n) => n.uuid === uuid)?.name ?? uuid.slice(0, 8)

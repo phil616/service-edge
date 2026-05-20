@@ -93,6 +93,12 @@ export interface Topology {
   frpc: FRPCClient[]
 }
 
+export interface AgentDownloadSettings {
+  control_plane_base: string
+  agent_download_url_frps: string
+  agent_download_url_frpc: string
+}
+
 export interface AuditLog {
   id: number
   user_id?: number

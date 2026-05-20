@@ -105,6 +105,14 @@ type AuditLog struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// Setting is a control-plane key/value setting editable from the web UI
+// (e.g. per-agent-type download URL overrides). Absent key = use built-in default.
+type Setting struct {
+	Key       string    `gorm:"column:key;primaryKey" json:"key"`
+	Value     string    `gorm:"column:value" json:"value"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
 // AllModels returns every model for auto-migration.
 func AllModels() []any {
 	return []any{
@@ -114,5 +122,6 @@ func AllModels() []any {
 		&ProxyMapping{},
 		&EnrollmentToken{},
 		&AuditLog{},
+		&Setting{},
 	}
 }

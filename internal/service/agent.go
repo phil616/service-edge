@@ -187,6 +187,31 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 	return nil
 }
 
+// LivenessTimeout is how long without a heartbeat before an agent that was
+// "online" is considered "offline". Heartbeats arrive every ~20s, so 60s allows
+// three misses before flipping. This is what makes a node go offline when its
+// agent is stopped/uninstalled or the host disappears — without it, status would
+// stay "online" forever.
+const LivenessTimeout = 60 * time.Second
+
+// ReapStaleAgents flips any frps node / frpc client whose last heartbeat is older
+// than LivenessTimeout from "online" to "offline". Pending (never-enrolled) rows
+// are untouched since they are not "online". Returns the number of rows updated.
+func (s *Service) ReapStaleAgents() int64 {
+	cutoff := time.Now().Add(-LivenessTimeout)
+	now := time.Now()
+	var total int64
+	for _, m := range []any{&model.FRPSNode{}, &model.FRPCClient{}} {
+		res := s.Store.DB.Model(m).
+			Where("status = ? AND (last_heartbeat IS NULL OR last_heartbeat < ?)", "online", cutoff).
+			UpdateColumns(map[string]any{"status": "offline", "updated_at": now})
+		if res.Error == nil {
+			total += res.RowsAffected
+		}
+	}
+	return total
+}
+
 func (s *Service) updateAgentLiveness(agentType, uuid string, t time.Time, status string) error {
 	res := s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).
 		UpdateColumns(map[string]any{"last_heartbeat": t, "status": status, "updated_at": t})

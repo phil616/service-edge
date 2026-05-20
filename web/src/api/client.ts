@@ -2,6 +2,7 @@ import axios from 'axios'
 import { message } from 'antd'
 import { useAuth } from '../store/auth'
 import type {
+  AgentDownloadSettings,
   AuditLog,
   CertInfo,
   FRPCClient,
@@ -135,6 +136,14 @@ export async function getCAInfo() {
 }
 export async function getTopology() {
   const { data } = await http.get<Topology>('/api/v1/topology')
+  return data
+}
+export async function getSettings() {
+  const { data } = await http.get<AgentDownloadSettings>('/api/v1/settings')
+  return data
+}
+export async function updateSettings(body: { agent_download_url_frps: string; agent_download_url_frpc: string }) {
+  const { data } = await http.put<AgentDownloadSettings>('/api/v1/settings', body)
   return data
 }
 

@@ -84,13 +84,35 @@ func main() {
 		}
 	}()
 
+	// Liveness reaper: periodically age out agents that stopped heartbeating so
+	// they don't stay "online" forever after being stopped or uninstalled.
+	reaperCtx, stopReaper := context.WithCancel(context.Background())
+	go runLivenessReaper(reaperCtx, svc)
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	slog.Info("shutting down")
+	stopReaper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+}
+
+// runLivenessReaper marks stale agents offline every 20s until ctx is cancelled.
+func runLivenessReaper(ctx context.Context, svc *service.Service) {
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if n := svc.ReapStaleAgents(); n > 0 {
+				slog.Info("liveness reaper marked agents offline", "count", n)
+			}
+		}
+	}
 }
 
 func runGenCA(args []string) {

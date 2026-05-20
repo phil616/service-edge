@@ -53,7 +53,7 @@ func (s *Service) RenderInstallScript(targetType, token string) (string, error) 
 		APIEndpoint:      s.Cfg.Server.ExternalURL,
 		APIToken:         s.Cfg.AgentAPIToken,
 		EnrollmentToken:  token,
-		AgentDownloadURL: s.Cfg.AgentDownloadBase,
+		AgentDownloadURL: s.AgentDownloadURL(targetType),
 		FrpVersion:       frpVersion,
 		FrpBaseURL:       strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"),
 	}
