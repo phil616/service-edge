@@ -10,6 +10,21 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// AgentRuntime holds the latest host + frp-process facts an agent reports. It is
+// embedded into both node types so the control plane can surface live host
+// details (arch, kernel, memory, uptime) and frp process state in the UI.
+type AgentRuntime struct {
+	OS                string     `gorm:"column:rt_os" json:"os,omitempty"`
+	Arch              string     `gorm:"column:rt_arch" json:"arch,omitempty"`
+	Kernel            string     `gorm:"column:rt_kernel" json:"kernel,omitempty"`
+	MemoryMB          uint64     `gorm:"column:rt_memory_mb" json:"memory_mb,omitempty"`
+	UptimeS           uint64     `gorm:"column:rt_uptime_sec" json:"uptime_sec,omitempty"`
+	ProcessPID        int        `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
+	ActiveConnections int        `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
+	FrpLastError      string     `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
+	ReportedAt        *time.Time `gorm:"column:rt_reported_at" json:"reported_at,omitempty"`
+}
+
 // FRPSNode is a public edge node running frps.
 type FRPSNode struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
@@ -27,8 +42,11 @@ type FRPSNode struct {
 	Status        string     `gorm:"default:pending" json:"status"`
 	LastHeartbeat *time.Time `gorm:"column:last_heartbeat" json:"last_heartbeat,omitempty"`
 	PublicIP      string     `gorm:"column:public_ip" json:"public_ip,omitempty"`
+	Runtime       AgentRuntime `gorm:"embedded" json:"runtime"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
+
+	TLSCertInfo any `gorm:"-" json:"tls_cert_info,omitempty"`
 }
 
 // FRPCClient is an internal client running an frpc instance.
@@ -43,10 +61,12 @@ type FRPCClient struct {
 	ConfigVersion int        `gorm:"column:config_version;default:1" json:"config_version"`
 	Status        string     `gorm:"default:pending" json:"status"`
 	LastHeartbeat *time.Time `gorm:"column:last_heartbeat" json:"last_heartbeat,omitempty"`
+	Runtime       AgentRuntime `gorm:"embedded" json:"runtime"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 
-	Proxies []ProxyMapping `gorm:"-" json:"proxies,omitempty"`
+	Proxies     []ProxyMapping `gorm:"-" json:"proxies,omitempty"`
+	TLSCertInfo any            `gorm:"-" json:"tls_cert_info,omitempty"`
 }
 
 // ProxyMapping is one port mapping belonging to an frpc client.

@@ -12,6 +12,7 @@ import FRPCDetail from './pages/FRPCDetail'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
 import Help from './pages/Help'
+import Topology from './pages/Topology'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const token = useAuth((s) => s.token)
@@ -32,6 +33,7 @@ export default function App() {
         }
       >
         <Route index element={<Dashboard />} />
+        <Route path="topology" element={<Topology />} />
         <Route path="frps" element={<FRPSList />} />
         <Route path="frps/new" element={<FRPSNew />} />
         <Route path="frps/:uuid" element={<FRPSDetail />} />

@@ -6,6 +6,7 @@ import {
   FileSearchOutlined,
   SettingOutlined,
   QuestionCircleOutlined,
+  PartitionOutlined,
   UserOutlined,
   LogoutOutlined,
 } from '@ant-design/icons'
@@ -17,6 +18,7 @@ const { Header, Sider, Content } = Layout
 
 const items = [
   { key: '/', icon: <DashboardOutlined />, label: '总览' },
+  { key: '/topology', icon: <PartitionOutlined />, label: '网络拓扑' },
   { key: '/frps', icon: <CloudServerOutlined />, label: 'FRPS 节点' },
   { key: '/frpc', icon: <ApiOutlined />, label: 'FRPC 客户端' },
   { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志' },

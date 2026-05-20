@@ -4,6 +4,34 @@ export interface User {
   created_at?: string
 }
 
+export interface AgentRuntime {
+  os?: string
+  arch?: string
+  kernel?: string
+  memory_mb?: number
+  uptime_sec?: number
+  process_pid?: number
+  active_connections?: number
+  frp_last_error?: string
+  reported_at?: string | null
+}
+
+export interface CertInfo {
+  subject: string
+  issuer: string
+  serial_number: string
+  not_before: string
+  not_after: string
+  is_ca: boolean
+  dns_names?: string[]
+  signature_algorithm: string
+  public_key_algorithm: string
+  key_bits?: number
+  fingerprint_sha256: string
+  days_remaining: number
+  expired: boolean
+}
+
 export interface FRPSNode {
   id: number
   uuid: string
@@ -16,6 +44,8 @@ export interface FRPSNode {
   status: 'pending' | 'online' | 'offline'
   last_heartbeat?: string | null
   public_ip?: string
+  runtime?: AgentRuntime
+  tls_cert_info?: CertInfo | null
   created_at: string
   updated_at: string
 }
@@ -42,9 +72,25 @@ export interface FRPCClient {
   config_version: number
   status: 'pending' | 'online' | 'offline'
   last_heartbeat?: string | null
+  runtime?: AgentRuntime
+  tls_cert_info?: CertInfo | null
   created_at: string
   updated_at: string
   proxies?: ProxyMapping[]
+}
+
+export interface PortUse {
+  port: number
+  kind: 'bind' | 'dashboard' | 'proxy'
+  frpc_uuid?: string
+  frpc_name?: string
+  proxy_name?: string
+  proxy_type?: string
+}
+
+export interface Topology {
+  frps: FRPSNode[]
+  frpc: FRPCClient[]
 }
 
 export interface AuditLog {

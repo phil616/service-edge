@@ -3,11 +3,14 @@ import { message } from 'antd'
 import { useAuth } from '../store/auth'
 import type {
   AuditLog,
+  CertInfo,
   FRPCClient,
   FRPSNode,
   InstallCommandResponse,
+  PortUse,
   ProxyInput,
   ProxyMapping,
+  Topology,
   User,
 } from './types'
 
@@ -78,6 +81,10 @@ export async function frpsUsedPorts(uuid: string) {
   const { data } = await http.get<{ used_ports: number[] }>(`/api/v1/frps/${uuid}/available-ports`)
   return data.used_ports ?? []
 }
+export async function frpsPortUsage(uuid: string) {
+  const { data } = await http.get<{ items: PortUse[] }>(`/api/v1/frps/${uuid}/port-usage`)
+  return data.items ?? []
+}
 
 // ---- frpc ----
 export async function listFRPC() {
@@ -119,6 +126,16 @@ export async function updateProxy(id: number, body: ProxyInput) {
 }
 export async function deleteProxy(id: number) {
   await http.delete(`/api/v1/proxies/${id}`)
+}
+
+// ---- insights ----
+export async function getCAInfo() {
+  const { data } = await http.get<CertInfo>('/api/v1/ca')
+  return data
+}
+export async function getTopology() {
+  const { data } = await http.get<Topology>('/api/v1/topology')
+  return data
 }
 
 // ---- audit ----

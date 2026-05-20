@@ -7,6 +7,8 @@ import dayjs from 'dayjs'
 import { addProxy, deleteProxy, frpcInstallCommand, getFRPC, getFRPS, updateFRPC, updateProxy } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import InstallCommand from '../components/InstallCommand'
+import HostRuntime from '../components/HostRuntime'
+import CertDescriptions from '../components/CertDescriptions'
 import type { ProxyMapping } from '../api/types'
 
 const PROXY_TYPES = ['tcp', 'udp', 'http', 'https']
@@ -168,11 +170,18 @@ export default function FRPCDetail() {
         <Card
           title="端口映射"
           extra={<Button icon={<PlusOutlined />} onClick={openAdd}>新增映射</Button>}
+          style={{ marginBottom: 16 }}
         >
           <Table rowKey="id" dataSource={data?.proxies ?? []} columns={columns} pagination={false} />
         </Card>
+        <Card title="客户端证书 (frpc client)" size="small">
+          <CertDescriptions info={data?.tls_cert_info} />
+        </Card>
       </Col>
       <Col xs={24} lg={10}>
+        <Card title="主机运行环境" style={{ marginBottom: 16 }}>
+          <HostRuntime runtime={data?.runtime} />
+        </Card>
         <Card title="安装命令">
           <InstallCommand generate={() => frpcInstallCommand(uuid)} />
         </Card>

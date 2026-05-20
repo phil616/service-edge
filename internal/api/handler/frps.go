@@ -23,6 +23,7 @@ func (h *Handler) GetFRPS(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	node.TLSCertInfo = h.Svc.LeafCertInfo(node.TLSCert)
 	c.JSON(http.StatusOK, node)
 }
 

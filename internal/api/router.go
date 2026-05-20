@@ -57,6 +57,7 @@ func NewRouter(o Options) *gin.Engine {
 		authed.POST("/frps/:uuid/install-command", o.Handler.InstallCommandFRPS)
 		authed.GET("/frps/:uuid/status", o.Handler.FRPSStatus)
 		authed.GET("/frps/:uuid/available-ports", o.Handler.AvailablePorts)
+		authed.GET("/frps/:uuid/port-usage", o.Handler.PortUsage)
 
 		authed.GET("/frpc", o.Handler.ListFRPC)
 		authed.POST("/frpc", o.Handler.CreateFRPC)
@@ -70,6 +71,9 @@ func NewRouter(o Options) *gin.Engine {
 
 		authed.PUT("/proxies/:id", o.Handler.UpdateProxy)
 		authed.DELETE("/proxies/:id", o.Handler.DeleteProxy)
+
+		authed.GET("/ca", o.Handler.CAInfo)
+		authed.GET("/topology", o.Handler.Topology)
 
 		authed.GET("/audit-logs", o.Handler.ListAuditLogs)
 	}

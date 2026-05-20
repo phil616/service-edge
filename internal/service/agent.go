@@ -169,9 +169,21 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 	if err := s.updateAgentLiveness(agentType, uuid, now, status); err != nil {
 		return err
 	}
-	if req.FrpVersion != "" {
-		s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).Update("frp_version", normalizeFrpVersion(req.FrpVersion))
+	updates := map[string]any{
+		"rt_os":           req.SystemInfo.OS,
+		"rt_arch":         req.SystemInfo.Arch,
+		"rt_kernel":       req.SystemInfo.Kernel,
+		"rt_memory_mb":    req.SystemInfo.MemoryMB,
+		"rt_uptime_sec":   req.SystemInfo.UptimeS,
+		"rt_process_pid":  req.ProcessPID,
+		"rt_active_conns": req.FRPStatus.ActiveConnections,
+		"rt_last_error":   req.FRPStatus.LastError,
+		"rt_reported_at":  now,
 	}
+	if req.FrpVersion != "" {
+		updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
+	}
+	s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates)
 	return nil
 }
 

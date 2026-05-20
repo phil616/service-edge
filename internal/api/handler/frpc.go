@@ -24,6 +24,7 @@ func (h *Handler) GetFRPC(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	client.TLSCertInfo = h.Svc.LeafCertInfo(client.TLSCert)
 	c.JSON(http.StatusOK, client)
 }
 
