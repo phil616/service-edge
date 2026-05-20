@@ -58,7 +58,7 @@ export default function Help() {
     <Space direction="vertical" size={16} style={{ width: '100%', maxWidth: 920 }}>
       <Card title={<Title level={4} style={{ margin: 0 }}>系统说明</Title>}>
         <Paragraph>
-          <Text strong>service-edge</Text> 是一个基于 <Text code>frp</Text> 的边缘节点连接管理控制台。
+          <Text strong>云梦镜像边缘服务网络</Text>（<Text code>service-edge</Text>）是一个基于 <Text code>frp</Text> 的边缘节点连接管理控制台。
           它把内网穿透中分散在各台机器上的 <Text code>frps</Text>（服务端）与 <Text code>frpc</Text>（客户端）
           统一收拢到一个面板里管理，避免手动逐台编辑配置文件、重启进程。
         </Paragraph>

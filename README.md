@@ -1,4 +1,6 @@
-# service-edge — 云梦镜像边缘服务网络
+# 云梦镜像边缘服务网络（service-edge）
+
+> **云梦镜像边缘服务网络** 是项目正式名称，`service-edge` 为项目代号（用于代码、镜像、systemd 单元与安装路径等技术标识）。
 
 基于 FRP 的内网穿透管控系统（类 Cloudflare Tunnel 简化版）。统一控制面管理多个公网出口节点（frps）与内网客户端（frpc），通过 Web 控制台完成隧道的创建、部署与监控。
 
@@ -91,3 +93,14 @@ go vet ./...
 - 一次性安装 token：`UPDATE ... WHERE used_at IS NULL` 原子消费，唯一约束防重复。
 - 前后端分离，使用 `Authorization: Bearer <jwt>`，不使用 Cookie，CORS 严格白名单。
 - 所有写操作落审计日志。
+
+## 发布与供应链安全
+
+- **自动发布**：推送 `v*` 形式的 Git tag 触发 [`.github/workflows/release.yml`](./.github/workflows/release.yml)，自动构建前端、交叉编译控制面与 Agent 二进制（linux amd64/arm64）、生成 `SHA256SUMS`，并创建 GitHub Release。
+- **构建溯源**：发布产物附带 [SLSA build provenance](https://slsa.dev/) 证明（`actions/attest-build-provenance`），可用 `gh attestation verify` 校验来源。
+- **依赖治理**：[Dependabot](./.github/dependabot.yml) 每周检查 Go / npm / GitHub Actions 依赖更新；PR 经 [Dependency Review](./.github/workflows/dependency-review.yml) 拦截高危漏洞与不兼容许可。
+- **代码扫描**：[CodeQL](./.github/workflows/codeql.yml) 对 Go 与 TypeScript 做安全与质量扫描。
+
+## 许可
+
+本项目以 [MIT 许可](./LICENSE) 开源，版权归 **dreamreflex** 所有。

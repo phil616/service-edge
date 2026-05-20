@@ -1,0 +1,26 @@
+name: Dependency Review
+
+# 在 PR 阶段拦截引入已知漏洞或不兼容许可的依赖（供应链安全）。
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: write  # 允许在 PR 中回写依赖审查摘要
+
+jobs:
+  dependency-review:
+    name: Review dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # 本项目为 MIT，拒绝强 copyleft 许可的传染性依赖。
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0

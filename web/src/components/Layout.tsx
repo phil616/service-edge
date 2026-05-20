@@ -50,7 +50,10 @@ export default function AppLayout() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Sider breakpoint="lg" collapsedWidth="0">
-        <div style={{ color: '#fff', padding: 16, fontWeight: 600, fontSize: 16 }}>service-edge</div>
+        <div style={{ color: '#fff', padding: '16px 16px 12px' }}>
+          <div style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.3 }}>云梦镜像边缘服务网络</div>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', letterSpacing: 1, marginTop: 2 }}>service-edge</div>
+        </div>
         <Menu
           theme="dark"
           mode="inline"

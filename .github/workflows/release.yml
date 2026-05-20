@@ -1,0 +1,82 @@
+name: Release
+
+# 推送形如 v1.2.3 的 tag 即自动发布：构建前端、交叉编译二进制、
+# 生成校验和与构建溯源（SLSA provenance），并创建 GitHub Release。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write      # 创建 Release、上传产物
+  id-token: write      # 构建溯源签名所需的 OIDC token
+  attestations: write  # 写入 build provenance attestation
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 前端必须先构建到 internal/web/dist，控制面通过 go:embed 内嵌。
+      - name: Build frontend
+        run: make web
+
+      - name: Build binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          build() { # $1=GOOS $2=GOARCH $3=output $4=package
+            echo "==> $3"
+            GOOS="$1" GOARCH="$2" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "${LDFLAGS}" -o "dist/$3" "$4"
+          }
+          build linux amd64 service-edge_linux_amd64 ./cmd/server
+          build linux arm64 service-edge_linux_arm64 ./cmd/server
+          build linux amd64 agent_linux_amd64        ./cmd/agent
+          build linux arm64 agent_linux_arm64        ./cmd/agent
+          (cd dist && sha256sum * > SHA256SUMS)
+          ls -l dist
+
+      # 为每个二进制产物生成可验证的构建来源证明（供应链安全）。
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/service-edge_linux_amd64
+            dist/service-edge_linux_arm64
+            dist/agent_linux_amd64
+            dist/agent_linux_arm64
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            dist/service-edge_linux_amd64 \
+            dist/service-edge_linux_arm64 \
+            dist/agent_linux_amd64 \
+            dist/agent_linux_arm64 \
+            dist/SHA256SUMS \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
