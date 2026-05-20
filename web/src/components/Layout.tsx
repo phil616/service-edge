@@ -5,6 +5,7 @@ import {
   ApiOutlined,
   FileSearchOutlined,
   SettingOutlined,
+  QuestionCircleOutlined,
   UserOutlined,
   LogoutOutlined,
 } from '@ant-design/icons'
@@ -20,6 +21,7 @@ const items = [
   { key: '/frpc', icon: <ApiOutlined />, label: 'FRPC 客户端' },
   { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
+  { key: '/help', icon: <QuestionCircleOutlined />, label: '使用说明' },
 ]
 
 export default function AppLayout() {

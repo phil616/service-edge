@@ -1,21 +1,34 @@
 import { useState } from 'react'
 import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
-import { addProxy, deleteProxy, frpcInstallCommand, getFRPC, getFRPS } from '../api/client'
+import { addProxy, deleteProxy, frpcInstallCommand, getFRPC, getFRPS, updateFRPC, updateProxy } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import InstallCommand from '../components/InstallCommand'
 import type { ProxyMapping } from '../api/types'
 
 const PROXY_TYPES = ['tcp', 'udp', 'http', 'https']
 
+// Stored custom_domains is a JSON array string; show it comma-separated for editing.
+function domainsToText(raw?: string) {
+  if (!raw) return ''
+  try {
+    return (JSON.parse(raw) as string[]).join(', ')
+  } catch {
+    return raw
+  }
+}
+
 export default function FRPCDetail() {
   const { uuid = '' } = useParams()
   const qc = useQueryClient()
   const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState<ProxyMapping | null>(null)
+  const [clientOpen, setClientOpen] = useState(false)
   const [form] = Form.useForm()
+  const [clientForm] = Form.useForm()
   const proxyType = Form.useWatch('proxy_type', form)
 
   const { data } = useQuery({ queryKey: ['frpc', uuid], queryFn: () => getFRPC(uuid), refetchInterval: 10000 })
@@ -26,15 +39,33 @@ export default function FRPCDetail() {
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['frpc', uuid] })
+  const closeProxyModal = () => {
+    setModalOpen(false)
+    setEditing(null)
+    form.resetFields()
+  }
   const add = useMutation({
     mutationFn: (body: any) => addProxy(uuid, body),
     onSuccess: () => {
       invalidate()
-      setModalOpen(false)
-      form.resetFields()
+      closeProxyModal()
+    },
+  })
+  const update = useMutation({
+    mutationFn: ({ id, body }: { id: number; body: any }) => updateProxy(id, body),
+    onSuccess: () => {
+      invalidate()
+      closeProxyModal()
     },
   })
   const del = useMutation({ mutationFn: deleteProxy, onSuccess: invalidate })
+  const updateClient = useMutation({
+    mutationFn: (body: any) => updateFRPC(uuid, body),
+    onSuccess: () => {
+      invalidate()
+      setClientOpen(false)
+    },
+  })
 
   const accessAddr = (p: ProxyMapping) => {
     if ((p.proxy_type === 'tcp' || p.proxy_type === 'udp') && p.remote_port) {
@@ -50,6 +81,32 @@ export default function FRPCDetail() {
     return p.subdomain || '-'
   }
 
+  const openAdd = () => {
+    setEditing(null)
+    form.resetFields()
+    form.setFieldsValue({ proxy_type: 'tcp', local_ip: '127.0.0.1' })
+    setModalOpen(true)
+  }
+
+  const openEdit = (p: ProxyMapping) => {
+    setEditing(p)
+    form.setFieldsValue({
+      name: p.name,
+      proxy_type: p.proxy_type,
+      local_ip: p.local_ip,
+      local_port: p.local_port,
+      remote_port: p.remote_port ?? undefined,
+      custom_domains: domainsToText(p.custom_domains),
+      subdomain: p.subdomain || undefined,
+    })
+    setModalOpen(true)
+  }
+
+  const openEditClient = () => {
+    clientForm.setFieldsValue({ name: data?.name, frp_version: data?.frp_version })
+    setClientOpen(true)
+  }
+
   const columns = [
     { title: '名称', dataIndex: 'name' },
     { title: '协议', dataIndex: 'proxy_type', render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
@@ -58,15 +115,18 @@ export default function FRPCDetail() {
     {
       title: '操作',
       render: (_: unknown, r: ProxyMapping) => (
-        <Popconfirm title="删除该映射？" onConfirm={() => del.mutate(r.id)}>
-          <a style={{ color: '#cf1322' }}>删除</a>
-        </Popconfirm>
+        <Space>
+          <a onClick={() => openEdit(r)}>编辑</a>
+          <Popconfirm title="删除该映射？" onConfirm={() => del.mutate(r.id)}>
+            <a style={{ color: '#cf1322' }}>删除</a>
+          </Popconfirm>
+        </Space>
       ),
     },
   ]
 
-  const onAdd = (values: any) => {
-    add.mutate({
+  const onSubmitProxy = (values: any) => {
+    const body = {
       name: values.name,
       proxy_type: values.proxy_type,
       local_ip: values.local_ip || '127.0.0.1',
@@ -76,7 +136,12 @@ export default function FRPCDetail() {
         ? String(values.custom_domains).split(',').map((s: string) => s.trim()).filter(Boolean)
         : undefined,
       subdomain: values.subdomain || undefined,
-    })
+    }
+    if (editing) {
+      update.mutate({ id: editing.id, body })
+    } else {
+      add.mutate(body)
+    }
   }
 
   const isTcpUdp = proxyType === 'tcp' || proxyType === 'udp'
@@ -84,7 +149,11 @@ export default function FRPCDetail() {
   return (
     <Row gutter={16}>
       <Col xs={24} lg={14}>
-        <Card title={<Typography.Title level={4} style={{ margin: 0 }}>{data?.name ?? 'FRPC 客户端'}</Typography.Title>} style={{ marginBottom: 16 }}>
+        <Card
+          title={<Typography.Title level={4} style={{ margin: 0 }}>{data?.name ?? 'FRPC 客户端'}</Typography.Title>}
+          extra={<Button icon={<EditOutlined />} onClick={openEditClient}>编辑</Button>}
+          style={{ marginBottom: 16 }}
+        >
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="UUID"><span className="mono">{data?.uuid}</span></Descriptions.Item>
             <Descriptions.Item label="状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
@@ -98,7 +167,7 @@ export default function FRPCDetail() {
         </Card>
         <Card
           title="端口映射"
-          extra={<Button icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>新增映射</Button>}
+          extra={<Button icon={<PlusOutlined />} onClick={openAdd}>新增映射</Button>}
         >
           <Table rowKey="id" dataSource={data?.proxies ?? []} columns={columns} pagination={false} />
         </Card>
@@ -109,8 +178,15 @@ export default function FRPCDetail() {
         </Card>
       </Col>
 
-      <Modal title="新增端口映射" open={modalOpen} onOk={() => form.submit()} confirmLoading={add.isPending} onCancel={() => setModalOpen(false)}>
-        <Form form={form} layout="vertical" initialValues={{ proxy_type: 'tcp', local_ip: '127.0.0.1' }} onFinish={onAdd}>
+      <Modal
+        title={editing ? '编辑端口映射' : '新增端口映射'}
+        open={modalOpen}
+        onOk={() => form.submit()}
+        confirmLoading={add.isPending || update.isPending}
+        onCancel={closeProxyModal}
+        forceRender
+      >
+        <Form form={form} layout="vertical" initialValues={{ proxy_type: 'tcp', local_ip: '127.0.0.1' }} onFinish={onSubmitProxy}>
           <Form.Item name="name" label="映射名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -139,6 +215,24 @@ export default function FRPCDetail() {
               </Form.Item>
             </>
           )}
+        </Form>
+      </Modal>
+
+      <Modal
+        title="编辑 FRPC 客户端"
+        open={clientOpen}
+        onOk={() => clientForm.submit()}
+        confirmLoading={updateClient.isPending}
+        onCancel={() => setClientOpen(false)}
+        forceRender
+      >
+        <Form form={clientForm} layout="vertical" onFinish={(v) => updateClient.mutate(v)}>
+          <Form.Item name="name" label="客户端名称" rules={[{ required: true }]}>
+            <Input placeholder="例如 home-nas" />
+          </Form.Item>
+          <Form.Item name="frp_version" label="FRP 版本" extra="留空跟随目标节点版本">
+            <Input placeholder="例如 0.61.0" />
+          </Form.Item>
         </Form>
       </Modal>
     </Row>

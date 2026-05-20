@@ -11,6 +11,7 @@ import FRPCNew from './pages/FRPCNew'
 import FRPCDetail from './pages/FRPCDetail'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
+import Help from './pages/Help'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const token = useAuth((s) => s.token)
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="frpc/:uuid" element={<FRPCDetail />} />
         <Route path="audit-logs" element={<AuditLogs />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="help" element={<Help />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
