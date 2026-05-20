@@ -12,6 +12,7 @@ import FRPCDetail from './pages/FRPCDetail'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
 import Help from './pages/Help'
+import About from './pages/About'
 import Topology from './pages/Topology'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="audit-logs" element={<AuditLogs />} />
         <Route path="settings" element={<Settings />} />
         <Route path="help" element={<Help />} />
+        <Route path="about" element={<About />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

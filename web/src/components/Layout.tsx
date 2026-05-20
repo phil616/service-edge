@@ -7,6 +7,7 @@ import {
   SettingOutlined,
   QuestionCircleOutlined,
   PartitionOutlined,
+  InfoCircleOutlined,
   UserOutlined,
   LogoutOutlined,
 } from '@ant-design/icons'
@@ -24,6 +25,7 @@ const items = [
   { key: '/audit-logs', icon: <FileSearchOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
   { key: '/help', icon: <QuestionCircleOutlined />, label: '使用说明' },
+  { key: '/about', icon: <InfoCircleOutlined />, label: '关于' },
 ]
 
 export default function AppLayout() {
