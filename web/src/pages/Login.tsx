@@ -22,12 +22,15 @@ export default function Login() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5' }}>
-      <Card style={{ width: 380 }}>
-        <Typography.Title level={3} style={{ textAlign: 'center' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f7f7f7' }}>
+      <Card style={{ width: 392, boxShadow: '0 2px 8px rgba(26, 26, 26, 0.08)' }} styles={{ body: { padding: 32 } }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <span style={{ width: 28, height: 32, background: '#024ad8', transform: 'skewX(-12deg)' }} />
+        </div>
+        <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 4, fontWeight: 500 }}>
           云梦镜像边缘服务网络
         </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
+        <Typography.Paragraph type="secondary" style={{ textAlign: 'center', marginBottom: 24 }}>
           service-edge 控制台
         </Typography.Paragraph>
         <Form onFinish={onFinish} layout="vertical">
