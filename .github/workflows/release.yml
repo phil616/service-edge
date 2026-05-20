@@ -60,7 +60,7 @@ jobs:
 
       # 为每个二进制产物生成可验证的构建来源证明（供应链安全）。
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/service-edge_linux_amd64
