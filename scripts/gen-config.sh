@@ -129,35 +129,39 @@ echo "   agent_api_token / jwt_secret 已自动生成 (各 64 字符)。"
 echo
 CA_CERT=$(ask "CA 证书路径 (pki.ca_cert)" "/etc/service-edge/ca.crt")
 CA_KEY=$(ask "CA 私钥路径 (pki.ca_key)" "/etc/service-edge/ca.key")
+# 本地暂存目录，用于存放生成的 CA（与 config.yaml 中的路径解耦）
+LOCAL_CA_CERT=""
+LOCAL_CA_KEY=""
+CA_STAGING_DIR="${REPO_ROOT}/dev"
+
 if [ ! -f "$CA_CERT" ] || [ ! -f "$CA_KEY" ]; then
   echo "   提示: CA 文件 ($CA_CERT / $CA_KEY) 当前不存在。"
   echo "         控制面启动会强校验 CA 材料，缺少将 panic 退出。"
   if confirm "是否现在生成测试 CA 证书?"; then
-    local ca_dir
-    ca_dir="$(dirname "$CA_CERT")"
-    mkdir -p "$ca_dir"
+    mkdir -p "$CA_STAGING_DIR"
 
-    local se_cmd
+    local_ca_cert="${CA_STAGING_DIR}/$(basename "$CA_CERT")"
+    local_ca_key="${CA_STAGING_DIR}/$(basename "$CA_KEY")"
+
+    se_cmd=""
     if se_cmd=$(find_service_edge); then
-      echo ">> 使用 $se_cmd 生成测试 CA 到 $ca_dir ..."
-      "$se_cmd" gen-ca --out "$ca_dir"
+      echo ">> 使用 $se_cmd 生成测试 CA 到 $CA_STAGING_DIR ..."
+      "$se_cmd" gen-ca --out "$CA_STAGING_DIR"
     elif [ -f "$REPO_ROOT/Makefile" ] && grep -q 'dev-certs' "$REPO_ROOT/Makefile" 2>/dev/null; then
       echo ">> 使用 make dev-certs 生成测试 CA ..."
       (cd "$REPO_ROOT" && make dev-certs)
-      # make dev-certs 输出到 dev/，复制到目标目录
-      if [ "$ca_dir" != "$REPO_ROOT/dev" ] && [ -f "$REPO_ROOT/dev/ca.crt" ]; then
-        cp "$REPO_ROOT/dev/ca.crt" "$REPO_ROOT/dev/ca.key" "$ca_dir/" 2>/dev/null || true
-      fi
     elif command -v go >/dev/null 2>&1; then
       echo ">> 使用 go run 生成测试 CA ..."
-      (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$ca_dir")
+      (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$CA_STAGING_DIR")
     else
       echo "错误: 未找到 service-edge / make / go，无法生成 CA。" >&2
-      echo "      请手动运行: service-edge gen-ca --out $(dirname "$CA_CERT")" >&2
+      echo "      请手动运行: service-edge gen-ca --out $CA_STAGING_DIR" >&2
     fi
 
-    if [ -f "$CA_CERT" ] && [ -f "$CA_KEY" ]; then
-      echo ">> CA 材料已生成。"
+    if [ -f "$local_ca_cert" ] && [ -f "$local_ca_key" ]; then
+      echo ">> CA 材料已生成到 $CA_STAGING_DIR (config.yaml 保持远程路径不变)"
+      LOCAL_CA_CERT="$local_ca_cert"
+      LOCAL_CA_KEY="$local_ca_key"
     else
       echo "警告: CA 生成似乎未成功，启动前请确保 CA 文件就位。" >&2
     fi
@@ -339,19 +343,24 @@ push_to_remote() {
   }
 
   # ---------- CA 材料准备 ----------
-  # PKI 阶段可能已生成，这里作为二次确认
-  if [ ! -f "$CA_CERT" ] || [ ! -f "$CA_KEY" ]; then
-    echo
-    echo "   CA 材料 ($CA_CERT / $CA_KEY) 在本地不存在。"
-    if confirm "是否自动生成测试 CA 证书并推送到远程?"; then
-      local ca_dir
-      ca_dir="$(dirname "$CA_CERT")"
-      mkdir -p "$ca_dir"
+  # config.yaml 中的 CA 路径是运行时的目标路径；
+  # 本地 CA 存放在 CA_STAGING_DIR，推送时发送到 config.yaml 指定的远程路径。
+  local_cert="${LOCAL_CA_CERT:-$CA_CERT}"
+  local_key="${LOCAL_CA_KEY:-$CA_KEY}"
 
-      local se_cmd
+  # PKI 阶段可能已生成，这里作为二次确认
+  if [ ! -f "$local_cert" ] || [ ! -f "$local_key" ]; then
+    echo
+    echo "   CA 材料在本地不存在。"
+    if confirm "是否自动生成测试 CA 证书并推送到远程?"; then
+      mkdir -p "$CA_STAGING_DIR"
+      local_cert="${CA_STAGING_DIR}/$(basename "$CA_CERT")"
+      local_key="${CA_STAGING_DIR}/$(basename "$CA_KEY")"
+
+      se_cmd=""
       if se_cmd=$(find_service_edge); then
-        echo ">> 使用 $se_cmd 生成测试 CA 到 $ca_dir ..."
-        "$se_cmd" gen-ca --out "$ca_dir" || {
+        echo ">> 使用 $se_cmd 生成测试 CA 到 $CA_STAGING_DIR ..."
+        "$se_cmd" gen-ca --out "$CA_STAGING_DIR" || {
           echo "错误: CA 生成失败" >&2
           return 1
         }
@@ -361,12 +370,9 @@ push_to_remote() {
           echo "错误: make dev-certs 失败" >&2
           return 1
         }
-        if [ "$ca_dir" != "$REPO_ROOT/dev" ] && [ -f "$REPO_ROOT/dev/ca.crt" ]; then
-          cp "$REPO_ROOT/dev/ca.crt" "$REPO_ROOT/dev/ca.key" "$ca_dir/" 2>/dev/null || true
-        fi
       elif command -v go >/dev/null 2>&1; then
         echo ">> 使用 go run 生成测试 CA ..."
-        (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$ca_dir") || {
+        (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$CA_STAGING_DIR") || {
           echo "错误: go run gen-ca 失败" >&2
           return 1
         }
@@ -374,40 +380,48 @@ push_to_remote() {
         echo "错误: 未找到 service-edge / make / go，无法生成 CA。" >&2
         return 1
       fi
-      if [ -f "$CA_CERT" ]; then
-        echo ">> CA 材料已生成。"
-      fi
     fi
   fi
 
+  # 确保远程 CA 目录存在（按 config.yaml 中的路径创建）
+  remote_ca_dir="$(dirname "$CA_CERT")"
+  remote_key_dir="$(dirname "$CA_KEY")"
+  # 去掉 REMOTE_PATH 尾部斜杠做比较
+  _rp="${REMOTE_PATH%/}"
+  if [ "$remote_ca_dir" != "$_rp" ]; then
+    echo ">> 远程 CA 目录 ($remote_ca_dir) 与 REMOTE_PATH ($_rp) 不同，将按 config.yaml 中的路径创建。"
+  fi
+  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" "mkdir -p ${remote_ca_dir} ${remote_key_dir}" || {
+    echo "错误: 无法创建远程 CA 目录" >&2
+    return 1
+  }
+
   echo
   # 1. 推送 config.yaml
-  echo ">> 推送 config.yaml..."
+  echo ">> 推送 config.yaml 到 ${REMOTE_PATH}config.yaml"
   scp "${SCP_OPTS[@]}" "$OUT" "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}config.yaml" || {
     echo "错误: config.yaml 推送失败" >&2
     return 1
   }
 
-  # 2. 推送 CA 证书（如果本地存在）
-  if [ -f "$CA_CERT" ]; then
-    ca_cert_name="$(basename "$CA_CERT")"
-    echo ">> 推送 CA 证书: $CA_CERT"
-    scp "${SCP_OPTS[@]}" "$CA_CERT" "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}${ca_cert_name}" || {
+  # 2. 推送 CA 证书到 config.yaml 指定的路径
+  if [ -f "$local_cert" ]; then
+    echo ">> 推送 CA 证书: $local_cert -> ${SSH_USER}@${SSH_HOST}:${CA_CERT}"
+    scp "${SCP_OPTS[@]}" "$local_cert" "${SSH_USER}@${SSH_HOST}:${CA_CERT}" || {
       echo "警告: CA 证书推送失败，请手动处理" >&2
     }
   else
-    echo "   (CA 证书 $CA_CERT 在本地不存在，跳过)"
+    echo "   (CA 证书 $local_cert 在本地不存在，跳过)"
   fi
 
-  # 3. 推送 CA 私钥（如果本地存在）
-  if [ -f "$CA_KEY" ]; then
-    ca_key_name="$(basename "$CA_KEY")"
-    echo ">> 推送 CA 私钥: $CA_KEY"
-    scp "${SCP_OPTS[@]}" "$CA_KEY" "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}${ca_key_name}" || {
+  # 3. 推送 CA 私钥到 config.yaml 指定的路径
+  if [ -f "$local_key" ]; then
+    echo ">> 推送 CA 私钥: $local_key -> ${SSH_USER}@${SSH_HOST}:${CA_KEY}"
+    scp "${SCP_OPTS[@]}" "$local_key" "${SSH_USER}@${SSH_HOST}:${CA_KEY}" || {
       echo "警告: CA 私钥推送失败，请手动处理" >&2
     }
   else
-    echo "   (CA 私钥 $CA_KEY 在本地不存在，跳过)"
+    echo "   (CA 私钥 $local_key 在本地不存在，跳过)"
   fi
 
   echo ">> 推送完成。"
