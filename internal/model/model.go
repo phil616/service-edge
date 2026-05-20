@@ -22,7 +22,10 @@ type AgentRuntime struct {
 	ProcessPID        int        `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
 	ActiveConnections int        `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
 	FrpLastError      string     `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
-	ReportedAt        *time.Time `gorm:"column:rt_reported_at" json:"reported_at,omitempty"`
+	// ListenPorts is a JSON array of the host's bound ports as last reported by
+	// the agent. Kept internal (not serialized); surfaced via the port endpoints.
+	ListenPorts string     `gorm:"column:rt_listen_ports" json:"-"`
+	ReportedAt  *time.Time `gorm:"column:rt_reported_at" json:"reported_at,omitempty"`
 }
 
 // FRPSNode is a public edge node running frps.
@@ -80,7 +83,13 @@ type ProxyMapping struct {
 	RemotePort    *int      `gorm:"column:remote_port" json:"remote_port,omitempty"`
 	CustomDomains string    `gorm:"column:custom_domains" json:"custom_domains,omitempty"` // JSON array
 	Subdomain     string    `json:"subdomain,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	// Inactive marks a mapping the control plane will NOT render into frp config
+	// (e.g. its remote_port is occupied by another process on the frps host).
+	// Default false (active); set true so the column backfills existing rows to
+	// active on migration.
+	Inactive       bool      `gorm:"column:inactive;not null;default:false" json:"inactive"`
+	InactiveReason string    `gorm:"column:inactive_reason" json:"inactive_reason,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // EnrollmentToken is a one-time install token.

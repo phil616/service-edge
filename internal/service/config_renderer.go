@@ -59,6 +59,11 @@ func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr
 	b.WriteString("log.maxDays = 7\n")
 
 	for _, px := range proxies {
+		// Inactive mappings (e.g. remote_port occupied on the host) are not
+		// rendered, so frp never tries to bind a conflicting port.
+		if px.Inactive {
+			continue
+		}
 		b.WriteString("\n[[proxies]]\n")
 		fmt.Fprintf(&b, "name = %q\n", px.Name)
 		fmt.Fprintf(&b, "type = %q\n", px.ProxyType)

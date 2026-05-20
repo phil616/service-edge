@@ -1,4 +1,4 @@
-import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Select, Space, Typography } from 'antd'
+import { Button, Card, Col, Divider, Form, Input, InputNumber, Row, Select, Space, Typography, message } from 'antd'
 import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -26,6 +26,9 @@ export default function FRPCNew() {
     mutationFn: createFRPC,
     onSuccess: (c) => {
       qc.invalidateQueries({ queryKey: ['frpc'] })
+      if (c.proxies?.some((p) => p.inactive)) {
+        message.warning('部分远程端口已被目标主机占用，对应映射未激活，请前往详情页修改或删除')
+      }
       navigate(`/frpc/${c.uuid}`)
     },
   })

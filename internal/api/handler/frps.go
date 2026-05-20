@@ -84,7 +84,8 @@ func (h *Handler) FRPSStatus(c *gin.Context) {
 }
 
 func (h *Handler) AvailablePorts(c *gin.Context) {
-	used, err := h.Svc.UsedRemotePorts(c.Param("uuid"))
+	uuid := c.Param("uuid")
+	used, err := h.Svc.UsedRemotePorts(uuid)
 	if err != nil {
 		respondErr(c, err)
 		return
@@ -93,7 +94,12 @@ func (h *Handler) AvailablePorts(c *gin.Context) {
 	for p := range used {
 		usedList = append(usedList, p)
 	}
-	c.JSON(http.StatusOK, gin.H{"used_ports": usedList})
+	hostOccupied, err := h.Svc.HostOccupiedPorts(uuid)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"used_ports": usedList, "host_occupied_ports": hostOccupied})
 }
 
 // InstallCommandFRPS generates a one-time install command for an frps node.

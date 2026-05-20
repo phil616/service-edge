@@ -92,10 +92,12 @@ func (s *Service) CreateFRPC(in CreateFRPCInput) (*model.FRPCClient, error) {
 			if err := validateProxy(pin, used); err != nil {
 				return err
 			}
+			row := pin.toModel(uuid)
+			// Mark inactive if the host already has this remote_port bound.
+			setHostOccupancy(&row, externalPorts(node, used))
 			if pin.RemotePort != nil {
 				used[*pin.RemotePort] = true
 			}
-			row := pin.toModel(uuid)
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}

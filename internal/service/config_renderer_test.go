@@ -54,3 +54,20 @@ func TestRenderFRPCConfigProxies(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderFRPCConfigSkipsInactive(t *testing.T) {
+	active, conflicting := 6022, 6023
+	client := &model.FRPCClient{UUID: "client-1"}
+	node := &model.FRPSNode{UUID: "node-1", BindPort: 7000, FrpToken: "tok"}
+	proxies := []model.ProxyMapping{
+		{Name: "ssh", ProxyType: "tcp", LocalPort: 22, RemotePort: &active},
+		{Name: "db", ProxyType: "tcp", LocalPort: 5432, RemotePort: &conflicting, Inactive: true},
+	}
+	out := RenderFRPCConfig(client, node, "203.0.113.10", proxies)
+	if !strings.Contains(out, `name = "ssh"`) {
+		t.Errorf("active proxy should be rendered\n%s", out)
+	}
+	if strings.Contains(out, `name = "db"`) || strings.Contains(out, "remotePort = 6023") {
+		t.Errorf("inactive proxy must not be rendered\n%s", out)
+	}
+}

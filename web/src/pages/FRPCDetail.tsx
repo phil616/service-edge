@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd'
 import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import dayjs from 'dayjs'
-import { addProxy, deleteProxy, frpcInstallCommand, getFRPC, getFRPS, updateFRPC, updateProxy } from '../api/client'
+import { addProxy, deleteProxy, frpcInstallCommand, frpsPortAvailability, getFRPC, getFRPS, updateFRPC, updateProxy } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import InstallCommand from '../components/InstallCommand'
 import HostRuntime from '../components/HostRuntime'
@@ -39,6 +39,11 @@ export default function FRPCDetail() {
     queryFn: () => getFRPS(data!.frps_uuid),
     enabled: !!data?.frps_uuid,
   })
+  const { data: portAvail } = useQuery({
+    queryKey: ['frps-ports-avail', data?.frps_uuid],
+    queryFn: () => frpsPortAvailability(data!.frps_uuid),
+    enabled: !!data?.frps_uuid,
+  })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['frpc', uuid] })
   const closeProxyModal = () => {
@@ -46,18 +51,24 @@ export default function FRPCDetail() {
     setEditing(null)
     form.resetFields()
   }
+  // A proxy returned inactive means its remote_port is occupied on the host.
+  const warnIfInactive = (row?: ProxyMapping) => {
+    if (row?.inactive) message.warning(row.inactive_reason || '端口被占用，映射未激活')
+  }
   const add = useMutation({
     mutationFn: (body: any) => addProxy(uuid, body),
-    onSuccess: () => {
+    onSuccess: (row) => {
       invalidate()
       closeProxyModal()
+      warnIfInactive(row)
     },
   })
   const update = useMutation({
     mutationFn: ({ id, body }: { id: number; body: any }) => updateProxy(id, body),
-    onSuccess: () => {
+    onSuccess: (row) => {
       invalidate()
       closeProxyModal()
+      warnIfInactive(row)
     },
   })
   const del = useMutation({ mutationFn: deleteProxy, onSuccess: invalidate })
@@ -115,6 +126,17 @@ export default function FRPCDetail() {
     { title: '本地', render: (_: unknown, r: ProxyMapping) => `${r.local_ip}:${r.local_port}` },
     { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r)}</span> },
     {
+      title: '状态',
+      render: (_: unknown, r: ProxyMapping) =>
+        r.inactive ? (
+          <Tooltip title={r.inactive_reason}>
+            <Tag color="error">未激活</Tag>
+          </Tooltip>
+        ) : (
+          <Tag color="success">已激活</Tag>
+        ),
+    },
+    {
       title: '操作',
       render: (_: unknown, r: ProxyMapping) => (
         <Space>
@@ -126,6 +148,11 @@ export default function FRPCDetail() {
       ),
     },
   ]
+
+  // remote_port checks: ports assigned to other mappings (hard reject) and ports
+  // occupied by external processes on the host (allowed but created inactive).
+  const usedPorts = (portAvail?.used_ports ?? []).filter((p) => p !== editing?.remote_port)
+  const hostOccupied = portAvail?.host_occupied_ports ?? []
 
   const onSubmitProxy = (values: any) => {
     const body = {
@@ -211,7 +238,24 @@ export default function FRPCDetail() {
             </Form.Item>
           </Space>
           {isTcpUdp ? (
-            <Form.Item name="remote_port" label="远程端口" rules={[{ required: true }]}>
+            <Form.Item
+              name="remote_port"
+              label="远程端口"
+              rules={[
+                { required: true },
+                {
+                  validator: (_, value) =>
+                    value && usedPorts.includes(Number(value))
+                      ? Promise.reject(new Error('该端口已被其他映射占用'))
+                      : Promise.resolve(),
+                },
+              ]}
+              extra={
+                hostOccupied.length
+                  ? `目标主机被外部进程占用的端口（填入将不会激活）：${hostOccupied.join(', ')}`
+                  : undefined
+              }
+            >
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
           ) : (

@@ -85,11 +85,12 @@ func (r *Runner) statusLoop(ctx context.Context) {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		req := protocol.StatusRequest{
-			ConfigVersion: r.state.Version(),
-			ProcessAlive:  r.processAlive(),
-			ProcessPID:    r.systemd.MainPID(r.unit),
-			FrpVersion:    frp.FrpVersion(r.cfg.FrpBinaryPath),
-			SystemInfo:    collectSystemInfo(),
+			ConfigVersion:  r.state.Version(),
+			ProcessAlive:   r.processAlive(),
+			ProcessPID:     r.systemd.MainPID(r.unit),
+			FrpVersion:     frp.FrpVersion(r.cfg.FrpBinaryPath),
+			SystemInfo:     collectSystemInfo(),
+			ListeningPorts: collectListeningPorts(),
 		}
 		if err := r.client.ReportStatus(cctx, req); err != nil {
 			slog.Debug("status report failed", "err", err)

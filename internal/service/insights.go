@@ -93,5 +93,14 @@ func (s *Service) PortUsage(frpsUUID string) ([]PortUse, error) {
 			})
 		}
 	}
+
+	// External ports the agent reported as bound on the host (not assigned by us).
+	hostOccupied, err := s.HostOccupiedPorts(frpsUUID)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range hostOccupied {
+		out = append(out, PortUse{Port: p, Kind: "host"})
+	}
 	return out, nil
 }

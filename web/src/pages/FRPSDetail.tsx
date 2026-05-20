@@ -13,6 +13,7 @@ const KIND_LABEL: Record<string, { text: string; color: string }> = {
   bind: { text: '服务端口', color: 'blue' },
   dashboard: { text: 'Dashboard', color: 'purple' },
   proxy: { text: '映射', color: 'green' },
+  host: { text: '主机占用(外部)', color: 'red' },
 }
 
 export default function FRPSDetail() {

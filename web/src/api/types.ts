@@ -60,6 +60,8 @@ export interface ProxyMapping {
   remote_port?: number | null
   custom_domains?: string
   subdomain?: string
+  inactive?: boolean
+  inactive_reason?: string
   created_at: string
 }
 
@@ -81,11 +83,16 @@ export interface FRPCClient {
 
 export interface PortUse {
   port: number
-  kind: 'bind' | 'dashboard' | 'proxy'
+  kind: 'bind' | 'dashboard' | 'proxy' | 'host'
   frpc_uuid?: string
   frpc_name?: string
   proxy_name?: string
   proxy_type?: string
+}
+
+export interface PortAvailability {
+  used_ports: number[]
+  host_occupied_ports: number[]
 }
 
 export interface Topology {

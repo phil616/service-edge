@@ -8,6 +8,7 @@ import type {
   FRPCClient,
   FRPSNode,
   InstallCommandResponse,
+  PortAvailability,
   PortUse,
   ProxyInput,
   ProxyMapping,
@@ -79,8 +80,12 @@ export async function frpsInstallCommand(uuid: string) {
   return data
 }
 export async function frpsUsedPorts(uuid: string) {
-  const { data } = await http.get<{ used_ports: number[] }>(`/api/v1/frps/${uuid}/available-ports`)
+  const { data } = await http.get<PortAvailability>(`/api/v1/frps/${uuid}/available-ports`)
   return data.used_ports ?? []
+}
+export async function frpsPortAvailability(uuid: string) {
+  const { data } = await http.get<PortAvailability>(`/api/v1/frps/${uuid}/available-ports`)
+  return { used_ports: data.used_ports ?? [], host_occupied_ports: data.host_occupied_ports ?? [] }
 }
 export async function frpsPortUsage(uuid: string) {
   const { data } = await http.get<{ items: PortUse[] }>(`/api/v1/frps/${uuid}/port-usage`)

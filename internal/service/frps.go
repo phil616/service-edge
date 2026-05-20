@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"gorm.io/gorm"
@@ -185,6 +186,27 @@ func (s *Service) UsedRemotePorts(frpsUUID string) (map[int]bool, error) {
 		}
 	}
 	return used, nil
+}
+
+// HostOccupiedPorts returns ports the frps host reports as bound that are NOT
+// assigned by service-edge — i.e. occupied by external processes. These cannot
+// be used as remote_port; the control plane learns them only from agent reports.
+func (s *Service) HostOccupiedPorts(frpsUUID string) ([]int, error) {
+	node, err := s.GetFRPS(frpsUUID)
+	if err != nil {
+		return nil, err
+	}
+	used, err := s.UsedRemotePorts(frpsUUID)
+	if err != nil {
+		return nil, err
+	}
+	ext := externalPorts(*node, used)
+	out := make([]int, 0, len(ext))
+	for p := range ext {
+		out = append(out, p)
+	}
+	sort.Ints(out)
+	return out, nil
 }
 
 // bumpClientsOf increments config_version for all frpc clients of an frps and

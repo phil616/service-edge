@@ -92,6 +92,9 @@ func (s *Service) AddProxy(frpcUUID string, in ProxyMappingInput) (*model.ProxyM
 			return err
 		}
 		row = in.toModel(frpcUUID)
+		// Host-occupancy check: a remote_port held by a non-service-edge process
+		// on the frps host cannot bind, so the mapping is created inactive.
+		setHostOccupancy(&row, externalPorts(node, used))
 		return tx.Create(&row).Error
 	})
 	if err != nil {
@@ -131,9 +134,16 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 		if err := validateProxy(in, used); err != nil {
 			return err
 		}
+		// Host-occupancy: the proxy's own current port may appear in the host's
+		// reported ports (frp binds it), so exclude it from the external set.
+		external := externalPorts(node, used)
+		if row.RemotePort != nil {
+			delete(external, *row.RemotePort)
+		}
 		updated := in.toModel(frpcUUID)
 		updated.ID = row.ID
 		updated.CreatedAt = row.CreatedAt
+		setHostOccupancy(&updated, external)
 		row = updated
 		return tx.Save(&row).Error
 	})
@@ -157,6 +167,39 @@ func (s *Service) DeleteProxy(id uint) error {
 	}
 	s.bumpFRPC(row.FRPCUUID)
 	return nil
+}
+
+// parseListenPorts decodes the JSON port array an agent reported for its host.
+func parseListenPorts(raw string) []int {
+	if raw == "" {
+		return nil
+	}
+	var ports []int
+	_ = json.Unmarshal([]byte(raw), &ports)
+	return ports
+}
+
+// externalPorts returns the set of ports the frps host reports as bound that are
+// NOT assigned by service-edge (serviceEdge) — i.e. held by other processes.
+func externalPorts(node model.FRPSNode, serviceEdge map[int]bool) map[int]bool {
+	ext := map[int]bool{}
+	for _, p := range parseListenPorts(node.Runtime.ListenPorts) {
+		if !serviceEdge[p] {
+			ext[p] = true
+		}
+	}
+	return ext
+}
+
+// setHostOccupancy marks a tcp/udp mapping inactive when its remote_port is held
+// by another process on the frps host (so frp would fail to bind it).
+func setHostOccupancy(row *model.ProxyMapping, external map[int]bool) {
+	row.Inactive = false
+	row.InactiveReason = ""
+	if (row.ProxyType == "tcp" || row.ProxyType == "udp") && row.RemotePort != nil && external[*row.RemotePort] {
+		row.Inactive = true
+		row.InactiveReason = fmt.Sprintf("远程端口 %d 已被目标节点主机上的其他进程占用，映射未激活；请更换端口或删除该映射", *row.RemotePort)
+	}
 }
 
 // usedPortsTx computes the occupied remote ports within an existing tx.

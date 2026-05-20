@@ -37,6 +37,10 @@ type StatusRequest struct {
 	SystemInfo    SystemInfo    `json:"system_info"`
 	FRPStatus     FRPStatus     `json:"frp_status"`
 	ConfigSummary ConfigSummary `json:"config_summary"`
+	// ListeningPorts are the TCP/UDP ports currently bound on the agent's host.
+	// The control plane uses these to detect remote_port conflicts caused by
+	// processes outside service-edge (it cannot probe hosts itself).
+	ListeningPorts []int `json:"listening_ports,omitempty"`
 }
 
 // FrpBinary tells the agent which frp release to install.

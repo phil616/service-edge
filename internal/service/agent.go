@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -179,6 +180,11 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 		"rt_active_conns": req.FRPStatus.ActiveConnections,
 		"rt_last_error":   req.FRPStatus.LastError,
 		"rt_reported_at":  now,
+	}
+	if req.ListeningPorts != nil {
+		if b, err := json.Marshal(req.ListeningPorts); err == nil {
+			updates["rt_listen_ports"] = string(b)
+		}
 	}
 	if req.FrpVersion != "" {
 		updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
