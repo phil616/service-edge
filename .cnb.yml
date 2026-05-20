@@ -1,0 +1,111 @@
+# service-edge CNB 云原生构建 CICD 配置
+#
+# 控制面：单 Docker 镜像（内嵌前端 + 托管 agent 二进制），SSH 部署到服务器。
+# 多阶段构建全部在 Dockerfile 中完成（前端 npm build → Go 编译 → 精简运行镜像）。
+#
+# 需在密钥仓配置的变量（标识符 SVCEDGE）：
+#   DEVOPS_SVCEDGE_DEPLOY_TOKEN   远程机器拉取 CNB 制品库镜像用的部署 Token
+#
+# 服务器需预置（不入镜像、不入 git）：
+#   /etc/service-edge/config.yaml、ca.crt、ca.key
+#   /var/lib/service-edge/（SQLite 持久化目录，可写）
+
+main:
+  push:
+    - name: 构建并部署控制面
+      services:
+        - docker
+      imports:
+        - https://cnb.cool/greenshadecapital/dreamreflex/devops-server-secrets/-/blob/main/s2-server.yml
+      stages:
+        - name: docker login
+          script: docker login -u ${CNB_TOKEN_USER_NAME} -p "${CNB_TOKEN}" ${CNB_DOCKER_REGISTRY}
+
+        # 打两个标签：prod 用于生产部署，commit 用于审计/回滚
+        - name: docker build
+          script: |
+            docker build \
+              --build-arg VERSION=${CNB_COMMIT} \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:prod \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT} \
+              .
+
+        - name: docker push
+          script: |
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:prod
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${CNB_COMMIT}
+
+        - name: 远程部署
+          image: cnbcool/ssh
+          settings:
+            host:
+              - ${S2_IP}
+            username: ${S2_SSH_USER}
+            key: ${S2_SSH_PVKEY}
+            port: ${S2_SSH_PORT}
+            command_timeout: 5m
+            script: |
+              set -euo pipefail
+
+              # 远程机器登录 CNB 制品库（独立部署 Token）
+              docker login -u ${CNB_TOKEN_USER_NAME} -p "${DEVOPS_SVCEDGE_DEPLOY_TOKEN}" ${CNB_DOCKER_REGISTRY}
+
+              # 确保挂载目录存在
+              mkdir -p /etc/service-edge /var/lib/service-edge
+
+              # 停旧容器
+              docker stop service-edge || true
+              docker rm   service-edge || true
+
+              # 启新容器
+              #   - /etc/service-edge 只读挂载（config.yaml、ca.crt、ca.key）
+              #   - /var/lib/service-edge 读写挂载（SQLite 数据库）
+              #   - long-polling 接口会 hang 30s，前置反代需放大读超时
+              docker run -d --name service-edge \
+                --pull=always \
+                --restart unless-stopped \
+                -p 5008:5008 \
+                -v /etc/service-edge:/etc/service-edge:ro \
+                -v /var/lib/service-edge:/var/lib/service-edge \
+                -e BUILD_SHA="${CNB_COMMIT}" \
+                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:prod
+
+              # 清理旧镜像（保留正在运行的）
+              repo="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+              running_img_id="$(docker inspect -f '{{.Image}}' service-edge || true)"
+              docker images "${repo}" -q | grep -v "${running_img_id#sha256:}" | xargs -r docker rmi -f || true
+              docker image prune -f || true
+
+  # PR 检查：编译、静态检查、单测、前端构建
+  pull_request:
+    - name: CI 检查
+      stages:
+        - name: go vet + test
+          image: golang:1.26
+          env:
+            CGO_ENABLED: "0"
+          script: |
+            go vet ./...
+            go test ./...
+        - name: 前端构建检查
+          image: node:20
+          volumes:
+            - /root/.npm
+          script: |
+            cd web
+            npm ci
+            npm run build
+
+# 兜底分支（非 main）push 时只做编译与测试，不部署
+$:
+  push:
+    - name: 构建校验
+      stages:
+        - name: go build + test
+          image: golang:1.26
+          env:
+            CGO_ENABLED: "0"
+          script: |
+            go vet ./...
+            go test ./...
+            go build ./...

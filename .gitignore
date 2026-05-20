@@ -23,6 +23,7 @@
 # Config (keep example only)
 config.yaml
 config.local.yaml
+.remote-deploy.conf
 
 # Frontend
 web/node_modules/
@@ -33,6 +34,9 @@ web/.vite/
 # Keep .gitkeep so `//go:embed all:dist` still compiles on a fresh clone.
 internal/web/dist/*
 !internal/web/dist/.gitkeep
+
+# Script-generated backups
+*.bak
 
 # OS / editor
 .DS_Store
