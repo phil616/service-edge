@@ -1,0 +1,120 @@
+#!/bin/bash
+set -euo pipefail
+
+# ---- injected by control plane ----
+AGENT_UUID="{{ .UUID }}"
+API_ENDPOINT="{{ .APIEndpoint }}"
+API_TOKEN="{{ .APIToken }}"
+ENROLLMENT_TOKEN="{{ .EnrollmentToken }}"
+AGENT_DOWNLOAD_URL="{{ .AgentDownloadURL }}"
+FRP_VERSION="{{ .FrpVersion }}"
+FRP_BASE_URL="{{ .FrpBaseURL }}"
+# ------------------------------------
+
+INSTALL_DIR="/opt/service-edge/frpc-agent"
+FRPC_BINARY="$INSTALL_DIR/bin/frpc"
+INSTANCE_DIR="$INSTALL_DIR/instances/$AGENT_UUID"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "Please run this script as root." >&2
+  exit 1
+fi
+
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)  FRP_ARCH="amd64" ;;
+  aarch64) FRP_ARCH="arm64" ;;
+  *) echo "Unsupported arch: $ARCH" >&2; exit 1 ;;
+esac
+
+mkdir -p "$INSTALL_DIR"/{bin,config,logs}
+mkdir -p "$INSTANCE_DIR"/{config,data,logs}
+
+# frpc binary is shared across instances on this host; download only if absent.
+if [ ! -f "$FRPC_BINARY" ]; then
+  FRP_TARBALL="frp_${FRP_VERSION#v}_linux_${FRP_ARCH}.tar.gz"
+  FRP_URL="${FRP_BASE_URL}/${FRP_VERSION}/${FRP_TARBALL}"
+  echo "Downloading frpc: $FRP_URL"
+  curl -fSL "$FRP_URL" -o /tmp/frp.tar.gz
+  tar -xzf /tmp/frp.tar.gz -C /tmp/
+  cp /tmp/frp_*/frpc "$FRPC_BINARY"
+  chmod +x "$FRPC_BINARY"
+  rm -rf /tmp/frp.tar.gz /tmp/frp_*
+else
+  echo "Existing frpc found: $("$FRPC_BINARY" --version 2>/dev/null || echo unknown)"
+fi
+
+echo "Downloading agent: $AGENT_DOWNLOAD_URL"
+curl -fSL "$AGENT_DOWNLOAD_URL" -o "$INSTALL_DIR/bin/agent"
+chmod +x "$INSTALL_DIR/bin/agent"
+
+# One agent per host manages all frpc instances.
+cat > "$INSTALL_DIR/config/agent.yaml" <<EOF
+agent_type: "frpc"
+uuid: "$AGENT_UUID"
+api_endpoint: "$API_ENDPOINT"
+api_token: "$API_TOKEN"
+heartbeat_interval: "20s"
+status_report_interval: "180s"
+config_poll_timeout: "30s"
+frp_binary_path: "$FRPC_BINARY"
+systemd_unit: "service-edge-frpc"
+EOF
+
+# frpc systemd template unit (per-instance via %i).
+if [ ! -f /etc/systemd/system/service-edge-frpc@.service ]; then
+cat > /etc/systemd/system/service-edge-frpc@.service <<EOF
+[Unit]
+Description=Service Edge FRPC Instance %i
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$FRPC_BINARY -c $INSTALL_DIR/instances/%i/config/frpc.toml
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+if [ ! -f /etc/systemd/system/service-edge-frpc-agent.service ]; then
+cat > /etc/systemd/system/service-edge-frpc-agent.service <<EOF
+[Unit]
+Description=Service Edge FRPC Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/agent --config $INSTALL_DIR/config/agent.yaml
+Restart=on-failure
+RestartSec=10s
+StandardOutput=append:$INSTALL_DIR/logs/agent.log
+StandardError=append:$INSTALL_DIR/logs/agent.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+echo "Enrolling with control plane..."
+curl -fSL -X POST \
+  -H "X-Agent-Token: $API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"uuid\":\"$AGENT_UUID\",\"agent_type\":\"frpc\"}" \
+  "$API_ENDPOINT/api/v1/agent/enroll?token=$ENROLLMENT_TOKEN"
+echo
+
+systemctl daemon-reload
+systemctl enable service-edge-frpc-agent
+systemctl restart service-edge-frpc-agent
+
+echo
+echo "==========================================="
+echo "FRPC Agent installed and started."
+echo "UUID: $AGENT_UUID"
+echo "Instance dir: $INSTANCE_DIR"
+echo "Logs: $INSTALL_DIR/logs/agent.log"
+echo "==========================================="

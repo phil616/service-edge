@@ -1,0 +1,46 @@
+server:
+  listen: "0.0.0.0:8443"
+  external_url: "https://edge-api.dreamreflex.com"
+
+database:
+  path: "/var/lib/service-edge/data.db"
+
+# Agent <-> control-plane API auth token (all agents share this token for API auth).
+# NOT the frpc <-> frps token. Recommend 64 random chars.
+agent_api_token: "CHANGE_ME_agent_api_token_64_random_chars________________________"
+
+# JWT signing secret for user login. Recommend 64 random chars.
+jwt_secret: "CHANGE_ME_jwt_secret_64_random_chars_____________________________"
+
+# Control-plane CA (root or valid intermediate). Must load & validate at startup
+# or the server panics and exits.
+pki:
+  ca_cert: "/etc/service-edge/ca.crt"
+  ca_key: "/etc/service-edge/ca.key"
+
+# frp release download template ({version} is the tag, e.g. v0.61.1)
+frp_release:
+  base_url: "https://github.com/fatedier/frp/releases/download"
+  default_version: "v0.61.1"
+
+# Base URL the generated install scripts download the agent binary from.
+install_script_base: "https://edge-api.dreamreflex.com/install"
+
+# URL agents download the prebuilt agent binary from (per-arch suffix appended).
+agent_download_base: "https://edge-api.dreamreflex.com/download/agent"
+
+# One-time enrollment token TTL.
+enrollment_token_ttl: "15m"
+
+cors:
+  allowed_origins:
+    - "https://edge.dreamreflex.com"
+
+logging:
+  level: "info"
+  path: "/var/log/service-edge/server.log"
+
+# Initial admin user created on first boot if no users exist.
+bootstrap_admin:
+  username: "admin"
+  password: "admin12345"
