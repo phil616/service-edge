@@ -52,6 +52,19 @@ confirm() {
   [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+# 查找 service-edge 可执行文件：PATH → bin/ → 输出空
+find_service_edge() {
+  if command -v service-edge >/dev/null 2>&1; then
+    echo "service-edge"
+    return 0
+  fi
+  if [ -x "$REPO_ROOT/bin/service-edge" ]; then
+    echo "$REPO_ROOT/bin/service-edge"
+    return 0
+  fi
+  return 1
+}
+
 # YAML 字符串转义（处理双引号与反斜杠）
 yq_str() {
   local s="$1"
@@ -117,8 +130,38 @@ echo
 CA_CERT=$(ask "CA 证书路径 (pki.ca_cert)" "/etc/service-edge/ca.crt")
 CA_KEY=$(ask "CA 私钥路径 (pki.ca_key)" "/etc/service-edge/ca.key")
 if [ ! -f "$CA_CERT" ] || [ ! -f "$CA_KEY" ]; then
-  echo "   提示: CA 文件当前不存在。控制面启动会强校验 CA，请在启动前放置好。"
-  echo "         开发可用: service-edge gen-ca --out <dir>"
+  echo "   提示: CA 文件 ($CA_CERT / $CA_KEY) 当前不存在。"
+  echo "         控制面启动会强校验 CA 材料，缺少将 panic 退出。"
+  if confirm "是否现在生成测试 CA 证书?"; then
+    local ca_dir
+    ca_dir="$(dirname "$CA_CERT")"
+    mkdir -p "$ca_dir"
+
+    local se_cmd
+    if se_cmd=$(find_service_edge); then
+      echo ">> 使用 $se_cmd 生成测试 CA 到 $ca_dir ..."
+      "$se_cmd" gen-ca --out "$ca_dir"
+    elif [ -f "$REPO_ROOT/Makefile" ] && grep -q 'dev-certs' "$REPO_ROOT/Makefile" 2>/dev/null; then
+      echo ">> 使用 make dev-certs 生成测试 CA ..."
+      (cd "$REPO_ROOT" && make dev-certs)
+      # make dev-certs 输出到 dev/，复制到目标目录
+      if [ "$ca_dir" != "$REPO_ROOT/dev" ] && [ -f "$REPO_ROOT/dev/ca.crt" ]; then
+        cp "$REPO_ROOT/dev/ca.crt" "$REPO_ROOT/dev/ca.key" "$ca_dir/" 2>/dev/null || true
+      fi
+    elif command -v go >/dev/null 2>&1; then
+      echo ">> 使用 go run 生成测试 CA ..."
+      (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$ca_dir")
+    else
+      echo "错误: 未找到 service-edge / make / go，无法生成 CA。" >&2
+      echo "      请手动运行: service-edge gen-ca --out $(dirname "$CA_CERT")" >&2
+    fi
+
+    if [ -f "$CA_CERT" ] && [ -f "$CA_KEY" ]; then
+      echo ">> CA 材料已生成。"
+    else
+      echo "警告: CA 生成似乎未成功，启动前请确保 CA 文件就位。" >&2
+    fi
+  fi
 fi
 
 # ---------- frp ----------
@@ -296,50 +339,44 @@ push_to_remote() {
   }
 
   # ---------- CA 材料准备 ----------
-  # 如果本地 CA 文件不存在，询问是否自动生成测试 CA
+  # PKI 阶段可能已生成，这里作为二次确认
   if [ ! -f "$CA_CERT" ] || [ ! -f "$CA_KEY" ]; then
     echo
     echo "   CA 材料 ($CA_CERT / $CA_KEY) 在本地不存在。"
     if confirm "是否自动生成测试 CA 证书并推送到远程?"; then
-      local gen_ca_dir="${REPO_ROOT}/dev"
-      mkdir -p "$gen_ca_dir"
+      local ca_dir
+      ca_dir="$(dirname "$CA_CERT")"
+      mkdir -p "$ca_dir"
 
-      # 查找 service-edge 可执行文件: PATH → bin/ → make → go run
-      local se_cmd=""
-      if command -v service-edge >/dev/null 2>&1; then
-        se_cmd="service-edge"
-      elif [ -x "$REPO_ROOT/bin/service-edge" ]; then
-        se_cmd="$REPO_ROOT/bin/service-edge"
-      fi
-
-      if [ -n "$se_cmd" ]; then
-        echo ">> 使用 $se_cmd 生成测试 CA 到 $gen_ca_dir ..."
-        "$se_cmd" gen-ca --out "$gen_ca_dir" || {
+      local se_cmd
+      if se_cmd=$(find_service_edge); then
+        echo ">> 使用 $se_cmd 生成测试 CA 到 $ca_dir ..."
+        "$se_cmd" gen-ca --out "$ca_dir" || {
           echo "错误: CA 生成失败" >&2
           return 1
         }
       elif [ -f "$REPO_ROOT/Makefile" ] && grep -q 'dev-certs' "$REPO_ROOT/Makefile" 2>/dev/null; then
-        echo ">> 未找到编译好的 service-edge，使用 make dev-certs ..."
+        echo ">> 使用 make dev-certs 生成测试 CA ..."
         (cd "$REPO_ROOT" && make dev-certs) || {
           echo "错误: make dev-certs 失败" >&2
           return 1
         }
+        if [ "$ca_dir" != "$REPO_ROOT/dev" ] && [ -f "$REPO_ROOT/dev/ca.crt" ]; then
+          cp "$REPO_ROOT/dev/ca.crt" "$REPO_ROOT/dev/ca.key" "$ca_dir/" 2>/dev/null || true
+        fi
       elif command -v go >/dev/null 2>&1; then
         echo ">> 使用 go run 生成测试 CA ..."
-        (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$gen_ca_dir") || {
+        (cd "$REPO_ROOT" && go run ./cmd/server gen-ca --out "$ca_dir") || {
           echo "错误: go run gen-ca 失败" >&2
           return 1
         }
       else
-        echo "错误: 未找到 service-edge / make / go，请先编译。" >&2
+        echo "错误: 未找到 service-edge / make / go，无法生成 CA。" >&2
         return 1
       fi
-      # 更新 CA_CERT / CA_KEY 指向刚生成的文件，并回写到 config.yaml
-      CA_CERT="${gen_ca_dir}/ca.crt"
-      CA_KEY="${gen_ca_dir}/ca.key"
-      echo ">> 更新 config.yaml 中的 CA 路径..."
-      sed -i "s|ca_cert:.*|ca_cert: \"${CA_CERT}\"|" "$OUT"
-      sed -i "s|ca_key:.*|ca_key: \"${CA_KEY}\"|" "$OUT"
+      if [ -f "$CA_CERT" ]; then
+        echo ">> CA 材料已生成。"
+      fi
     fi
   fi
 
