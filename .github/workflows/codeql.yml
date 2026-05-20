@@ -36,7 +36,7 @@ jobs:
       # 仓库内 internal/web/dist 仅含 .gitkeep，足以满足 go:embed all:dist 编译。
       - name: Set up Go
         if: matrix.language == 'go'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
