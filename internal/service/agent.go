@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -149,6 +150,27 @@ func (s *Service) frpBinary(version, osName, arch string) protocol.FrpBinary {
 	file := fmt.Sprintf("frp_%s_%s_%s.tar.gz", v, osName, arch)
 	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), tag, file)
 	return protocol.FrpBinary{Version: version, DownloadURL: url}
+}
+
+// NoteFRPSPublicIP auto-fills an frps node's public IP from the source address
+// the agent connects from, but only when it is not already set. frpc clients dial
+// this address (serverAddr); without it they get a non-resolvable placeholder
+// ("frps-<uuid>") and cannot connect. Setting it bumps connected frpc clients so
+// their config is re-rendered with the real address. A manually set IP is never
+// overwritten; loopback sources are ignored (never a usable remote dial address).
+func (s *Service) NoteFRPSPublicIP(agentType, uuid, ip string) {
+	if agentType != "frps" || ip == "" {
+		return
+	}
+	if parsed := net.ParseIP(ip); parsed == nil || parsed.IsLoopback() || parsed.IsUnspecified() {
+		return
+	}
+	res := s.Store.DB.Model(&model.FRPSNode{}).
+		Where("uuid = ? AND (public_ip IS NULL OR public_ip = '')", uuid).
+		Update("public_ip", ip)
+	if res.Error == nil && res.RowsAffected > 0 {
+		s.bumpClientsOf(uuid)
+	}
 }
 
 // RecordHeartbeat updates last_heartbeat/status from a heartbeat ping.

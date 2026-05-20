@@ -25,6 +25,8 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	// Learn the frps public IP from the address it connects from (if unset).
+	h.Svc.NoteFRPSPublicIP(atype, uuid, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -40,6 +42,7 @@ func (h *Handler) AgentStatus(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	h.Svc.NoteFRPSPublicIP(atype, uuid, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
