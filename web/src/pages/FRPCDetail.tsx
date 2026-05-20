@@ -9,6 +9,7 @@ import StatusBadge from '../components/StatusBadge'
 import InstallCommand from '../components/InstallCommand'
 import HostRuntime from '../components/HostRuntime'
 import CertDescriptions from '../components/CertDescriptions'
+import AgentSyncInfo from '../components/AgentSyncInfo'
 import type { ProxyMapping } from '../api/types'
 
 const PROXY_TYPES = ['tcp', 'udp', 'http', 'https']
@@ -206,6 +207,9 @@ export default function FRPCDetail() {
         </Card>
       </Col>
       <Col xs={24} lg={10}>
+        <Card style={{ marginBottom: 16 }}>
+          <AgentSyncInfo lastHeartbeat={data?.last_heartbeat} reportedAt={data?.runtime?.reported_at} status={data?.status} />
+        </Card>
         <Card title="主机运行环境" style={{ marginBottom: 16 }}>
           <HostRuntime runtime={data?.runtime} />
         </Card>

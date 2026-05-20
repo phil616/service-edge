@@ -120,10 +120,11 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 		if serverAddr == "" {
 			serverAddr = "frps-" + node.UUID // placeholder until public_ip is set
 		}
+		adminUser, adminPass := protocol.FRPCAdminCreds(client.UUID, s.Cfg.AgentAPIToken)
 		return &protocol.ConfigResponse{
 			ConfigVersion: client.ConfigVersion,
 			FrpBinary:     s.frpBinary(client.FrpVersion, osName, arch),
-			FrpConfig:     RenderFRPCConfig(client, node, serverAddr, client.Proxies),
+			FrpConfig:     RenderFRPCConfig(client, node, serverAddr, client.Proxies, adminUser, adminPass),
 			TLSCert:       client.TLSCert,
 			TLSKey:        client.TLSKey,
 			CACert:        s.CA.CertPEM(),
@@ -190,7 +191,39 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 		updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
 	}
 	s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates)
+
+	if agentType == "frpc" {
+		s.applyProxyStatuses(uuid, req.ProxyStatuses)
+	}
 	return nil
+}
+
+// applyProxyStatuses reconciles ProxyMappings with the live frp status the frpc
+// agent reported. A proxy whose remote_port failed to bind on the frps host (frp
+// status "start error"/"check failed") is deactivated so it stops being pushed,
+// with the real frp error recorded for the user.
+func (s *Service) applyProxyStatuses(frpcUUID string, statuses []protocol.ProxyStatus) {
+	bumped := false
+	for _, st := range statuses {
+		if st.Status != "start error" && st.Status != "check failed" {
+			continue
+		}
+		reason := fmt.Sprintf("frp 启动失败（%s）", st.Status)
+		if st.Err != "" {
+			reason += "：" + st.Err
+		}
+		reason += "；请更换远程端口或删除该映射"
+		// Only flip currently-active rows so we don't repeatedly bump the version.
+		res := s.Store.DB.Model(&model.ProxyMapping{}).
+			Where("frpc_uuid = ? AND name = ? AND inactive = ?", frpcUUID, st.Name, false).
+			UpdateColumns(map[string]any{"inactive": true, "inactive_reason": reason})
+		if res.Error == nil && res.RowsAffected > 0 {
+			bumped = true
+		}
+	}
+	if bumped {
+		s.bumpFRPC(frpcUUID)
+	}
 }
 
 // LivenessTimeout is how long without a heartbeat before an agent that was

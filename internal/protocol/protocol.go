@@ -2,6 +2,36 @@
 // agent API handlers and the agent client, so both sides stay in sync.
 package protocol
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
+// frpc admin (webServer) API: rendered into frpc.toml and queried by the agent
+// to learn each proxy's real frp status (e.g. a remote_port that failed to bind).
+const (
+	FRPCAdminAddr = "127.0.0.1"
+	FRPCAdminPort = 7400
+	FRPCAdminUser = "service-edge-agent"
+)
+
+// FRPCAdminCreds derives the frpc admin-API credentials deterministically from
+// the agent UUID and the shared agent API token, so the control plane (renderer)
+// and the agent compute identical values without extra plumbing.
+func FRPCAdminCreds(uuid, apiToken string) (user, password string) {
+	sum := sha256.Sum256([]byte(uuid + "|" + apiToken))
+	return FRPCAdminUser, hex.EncodeToString(sum[:])[:32]
+}
+
+// ProxyStatus is one proxy's live status as reported by frpc's admin API.
+type ProxyStatus struct {
+	Name       string `json:"name"`
+	Type       string `json:"type"`
+	Status     string `json:"status"` // running | start error | check failed | ...
+	Err        string `json:"err,omitempty"`
+	RemoteAddr string `json:"remote_addr,omitempty"`
+}
+
 // SystemInfo describes the host an agent runs on.
 type SystemInfo struct {
 	OS       string `json:"os"`
@@ -41,6 +71,10 @@ type StatusRequest struct {
 	// The control plane uses these to detect remote_port conflicts caused by
 	// processes outside service-edge (it cannot probe hosts itself).
 	ListeningPorts []int `json:"listening_ports,omitempty"`
+	// ProxyStatuses is the live per-proxy status from frpc's admin API (frpc
+	// agents only). The control plane uses it to flag proxies whose remote_port
+	// failed to bind on the frps host.
+	ProxyStatuses []ProxyStatus `json:"proxy_statuses,omitempty"`
 }
 
 // FrpBinary tells the agent which frp release to install.

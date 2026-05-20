@@ -7,6 +7,7 @@ import (
 
 	"github.com/dreamreflex/service-edge/internal/frp"
 	"github.com/dreamreflex/service-edge/internal/model"
+	"github.com/dreamreflex/service-edge/internal/protocol"
 )
 
 // RenderFRPSConfig renders frps.toml for the given node using the v0.61 flat-key
@@ -39,7 +40,9 @@ func RenderFRPSConfig(node *model.FRPSNode) string {
 
 // RenderFRPCConfig renders frpc.toml for the given client connecting to node.
 // serverAddr is the public address frpc dials (node public IP or hostname).
-func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr string, proxies []model.ProxyMapping) string {
+// When adminPassword is non-empty, frpc's localhost admin API is enabled so the
+// agent can read each proxy's real status (e.g. a remote_port that failed to bind).
+func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr string, proxies []model.ProxyMapping, adminUser, adminPassword string) string {
 	p := frp.FRPCPaths(client.UUID)
 	var b strings.Builder
 	fmt.Fprintf(&b, "serverAddr = %q\n", serverAddr)
@@ -53,6 +56,14 @@ func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr
 	// Pin to the frps cert CN/SAN so hostname verification is independent of the
 	// node's public IP (which may change or be unknown at creation time).
 	fmt.Fprintf(&b, "transport.tls.serverName = %q\n\n", "frps-"+node.UUID)
+
+	// Localhost-only admin API for proxy status introspection.
+	if adminPassword != "" {
+		fmt.Fprintf(&b, "webServer.addr = %q\n", protocol.FRPCAdminAddr)
+		fmt.Fprintf(&b, "webServer.port = %d\n", protocol.FRPCAdminPort)
+		fmt.Fprintf(&b, "webServer.user = %q\n", adminUser)
+		fmt.Fprintf(&b, "webServer.password = %q\n\n", adminPassword)
+	}
 
 	fmt.Fprintf(&b, "log.to = %q\n", p.LogFile)
 	b.WriteString("log.level = \"info\"\n")

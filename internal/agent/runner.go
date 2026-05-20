@@ -81,29 +81,33 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 func (r *Runner) statusLoop(ctx context.Context) {
 	ticker := time.NewTicker(r.cfg.StatusReportInterval.Std())
 	defer ticker.Stop()
-	report := func() {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		req := protocol.StatusRequest{
-			ConfigVersion:  r.state.Version(),
-			ProcessAlive:   r.processAlive(),
-			ProcessPID:     r.systemd.MainPID(r.unit),
-			FrpVersion:     frp.FrpVersion(r.cfg.FrpBinaryPath),
-			SystemInfo:     collectSystemInfo(),
-			ListeningPorts: collectListeningPorts(),
-		}
-		if err := r.client.ReportStatus(cctx, req); err != nil {
-			slog.Debug("status report failed", "err", err)
-		}
-	}
-	report() // initial report on startup
+	r.reportStatus(ctx) // initial report on startup
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			report()
+			r.reportStatus(ctx)
 		}
+	}
+}
+
+// reportStatus sends one detailed status report (host facts, listening ports and,
+// for frpc, live per-proxy frp status).
+func (r *Runner) reportStatus(ctx context.Context) {
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req := protocol.StatusRequest{
+		ConfigVersion:  r.state.Version(),
+		ProcessAlive:   r.processAlive(),
+		ProcessPID:     r.systemd.MainPID(r.unit),
+		FrpVersion:     frp.FrpVersion(r.cfg.FrpBinaryPath),
+		SystemInfo:     collectSystemInfo(),
+		ListeningPorts: collectListeningPorts(),
+		ProxyStatuses:  r.queryProxyStatuses(cctx),
+	}
+	if err := r.client.ReportStatus(cctx, req); err != nil {
+		slog.Debug("status report failed", "err", err)
 	}
 }
 
@@ -159,6 +163,17 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 	}
 	r.ack(ctx, bundle.ConfigVersion, true, "")
 	slog.Info("config applied", "version", bundle.ConfigVersion)
+
+	// Report status promptly so the control plane learns the new proxies' real
+	// frp state (e.g. a remote_port that failed to bind) without waiting a full
+	// status interval. The frp process needs a moment to (re)register proxies.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-time.After(processSettleWait):
+			r.reportStatus(ctx)
+		}
+	}()
 }
 
 func (r *Runner) ack(ctx context.Context, version int, ok bool, errMsg string) {

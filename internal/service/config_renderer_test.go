@@ -39,11 +39,12 @@ func TestRenderFRPCConfigProxies(t *testing.T) {
 		{Name: "ssh", ProxyType: "tcp", LocalIP: "127.0.0.1", LocalPort: 22, RemotePort: &remote},
 		{Name: "web", ProxyType: "http", LocalIP: "127.0.0.1", LocalPort: 8080, CustomDomains: `["a.example.com","b.example.com"]`},
 	}
-	out := RenderFRPCConfig(client, node, "203.0.113.10", proxies)
+	out := RenderFRPCConfig(client, node, "203.0.113.10", proxies, "admin", "secretpw")
 	for _, want := range []string{
 		`serverAddr = "203.0.113.10"`,
 		"serverPort = 7000",
 		`transport.tls.serverName = "frps-node-1"`,
+		`webServer.password = "secretpw"`,
 		"[[proxies]]",
 		`name = "ssh"`,
 		"remotePort = 6022",
@@ -63,7 +64,7 @@ func TestRenderFRPCConfigSkipsInactive(t *testing.T) {
 		{Name: "ssh", ProxyType: "tcp", LocalPort: 22, RemotePort: &active},
 		{Name: "db", ProxyType: "tcp", LocalPort: 5432, RemotePort: &conflicting, Inactive: true},
 	}
-	out := RenderFRPCConfig(client, node, "203.0.113.10", proxies)
+	out := RenderFRPCConfig(client, node, "203.0.113.10", proxies, "", "")
 	if !strings.Contains(out, `name = "ssh"`) {
 		t.Errorf("active proxy should be rendered\n%s", out)
 	}

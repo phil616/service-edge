@@ -1,4 +1,4 @@
-import { Button, Card, Popconfirm, Space, Table, Typography } from 'antd'
+import { Button, Card, Popconfirm, Space, Table, Tooltip, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -31,7 +31,12 @@ export default function FRPCList() {
     {
       title: '最后心跳',
       dataIndex: 'last_heartbeat',
-      render: (v: string | null) => (v ? dayjs(v).format('MM-DD HH:mm:ss') : '-'),
+      render: (v: string | null) =>
+        v ? (
+          <Tooltip title={dayjs(v).format('YYYY-MM-DD HH:mm:ss')}>{dayjs(v).fromNow()}</Tooltip>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '操作',
