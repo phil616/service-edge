@@ -30,7 +30,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Go autobuild 需要与 go.mod 一致的工具链版本。
       # 仓库内 internal/web/dist 仅含 .gitkeep，足以满足 go:embed all:dist 编译。
