@@ -132,17 +132,29 @@ func extractBinary(tarballPath, wantBin, destPath string) error {
 			return err
 		}
 		tmp := destPath + ".download"
-		out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-		if err != nil {
-			return err
-		}
-		if _, err := io.Copy(out, tr); err != nil {
-			out.Close()
+		if err := writeReaderToFile(tmp, tr, 0o755); err != nil {
 			os.Remove(tmp)
 			return err
 		}
-		out.Close()
 		return os.Rename(tmp, destPath)
 	}
 	return fmt.Errorf("binary %q not found in tarball", wantBin)
+}
+
+// writeReaderToFile copies r into a new file at path with the given mode. The
+// close (flush) error is surfaced via the named return so a failed final write
+// can't silently leave a truncated binary in place. If the copy itself fails,
+// that error wins and the close error is dropped (the file is discarded anyway).
+func writeReaderToFile(path string, r io.Reader, mode os.FileMode) (err error) {
+	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	_, err = io.Copy(out, r)
+	return err
 }
