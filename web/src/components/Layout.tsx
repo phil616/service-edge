@@ -1,4 +1,4 @@
-import { Layout, Menu, Dropdown, Avatar, Space } from 'antd'
+import { Breadcrumb, Layout, Menu, Dropdown, Avatar, Space } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
@@ -17,7 +17,7 @@ import { logout } from '../api/client'
 
 const { Header, Sider, Content } = Layout
 
-const items = [
+const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '总览' },
   { key: '/topology', icon: <PartitionOutlined />, label: '网络拓扑' },
   { key: '/frps', icon: <CloudServerOutlined />, label: 'FRPS 节点' },
@@ -28,18 +28,83 @@ const items = [
   { key: '/about', icon: <InfoCircleOutlined />, label: '关于' },
 ]
 
+const menuKeys = menuItems.map((i) => i.key)
+
+// Menu entries that act as parent containers for sub-routes.
+const parentPrefixes: { prefix: string; menuKey: string }[] = [
+  { prefix: '/frps', menuKey: '/frps' },
+  { prefix: '/frpc', menuKey: '/frpc' },
+  { prefix: '/connections', menuKey: '/frpc' },
+]
+
+function resolveSelectedKey(pathname: string): string {
+  if (menuKeys.includes(pathname)) return pathname
+  for (const { prefix, menuKey } of parentPrefixes) {
+    if (pathname.startsWith(prefix)) return menuKey
+  }
+  return '/'
+}
+
+function resolvePageTitle(pathname: string): string {
+  if (pathname === '/frps') return 'FRPS 节点'
+  if (pathname === '/frps/new') return '新建 FRPS 节点'
+  if (pathname.startsWith('/frps/')) return 'FRPS 节点详情'
+  if (pathname === '/frpc') return 'FRPC 主机'
+  if (pathname === '/frpc/new') return '新建 FRPC 主机'
+  if (pathname.match(/^\/frpc\/[^/]+\/connections\/new$/)) return '新增连接'
+  if (pathname.startsWith('/frpc/')) return 'FRPC 主机详情'
+  if (pathname.startsWith('/connections/')) return '连接详情'
+  if (pathname === '/topology') return '网络拓扑'
+  if (pathname === '/audit-logs') return '审计日志'
+  if (pathname === '/settings') return '系统设置'
+  if (pathname === '/help') return '使用说明'
+  if (pathname === '/about') return '关于'
+  return '总览'
+}
+
+interface Crumb {
+  title: string
+  path?: string
+}
+
+function resolveBreadcrumbs(pathname: string): Crumb[] {
+  if (pathname === '/') return [{ title: '总览' }]
+
+  if (pathname === '/topology') return [{ title: '总览', path: '/' }, { title: '网络拓扑' }]
+  if (pathname === '/audit-logs') return [{ title: '总览', path: '/' }, { title: '审计日志' }]
+  if (pathname === '/settings') return [{ title: '总览', path: '/' }, { title: '系统设置' }]
+  if (pathname === '/help') return [{ title: '总览', path: '/' }, { title: '使用说明' }]
+  if (pathname === '/about') return [{ title: '总览', path: '/' }, { title: '关于' }]
+
+  if (pathname.startsWith('/frps')) {
+    if (pathname === '/frps') return [{ title: 'FRPS 节点' }]
+    if (pathname === '/frps/new') return [{ title: 'FRPS 节点', path: '/frps' }, { title: '新建' }]
+    return [{ title: 'FRPS 节点', path: '/frps' }, { title: '详情' }]
+  }
+
+  if (pathname.startsWith('/frpc')) {
+    if (pathname === '/frpc') return [{ title: 'FRPC 主机' }]
+    if (pathname.match(/^\/frpc\/[^/]+\/connections\/new$/)) {
+      return [{ title: 'FRPC 主机', path: '/frpc' }, { title: '新增连接' }]
+    }
+    return [{ title: 'FRPC 主机', path: '/frpc' }, { title: '详情' }]
+  }
+
+  if (pathname.startsWith('/connections/')) {
+    return [{ title: '连接详情' }]
+  }
+
+  return [{ title: '总览' }]
+}
+
 export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, clear } = useAuth()
 
-  const selected =
-    items
-      .map((i) => i.key)
-      .filter((k) => (k === '/' ? location.pathname === '/' : location.pathname.startsWith(k)))
-      .sort((a, b) => b.length - a.length)[0] || '/'
-
-  const activeLabel = items.find((i) => i.key === selected)?.label ?? ''
+  const selectedKey = resolveSelectedKey(location.pathname)
+  const pageTitle = resolvePageTitle(location.pathname)
+  const breadcrumbItems = resolveBreadcrumbs(location.pathname)
 
   const onLogout = async () => {
     try {
@@ -55,7 +120,6 @@ export default function AppLayout() {
     <Layout style={{ minHeight: '100vh' }}>
       <Sider breakpoint="lg" collapsedWidth="0" width={232}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '18px 16px 14px' }}>
-          {/* Wordmark accent — a single skewed electric-blue slash echoing the brand. */}
           <span style={{ width: 16, height: 18, background: '#024ad8', transform: 'skewX(-12deg)', flex: '0 0 auto' }} />
           <div style={{ lineHeight: 1.25 }}>
             <div style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>云梦镜像边缘服务网络</div>
@@ -65,8 +129,8 @@ export default function AppLayout() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[selected]}
-          items={items}
+          selectedKeys={[selectedKey]}
+          items={menuItems}
           onClick={({ key }) => navigate(key)}
           style={{ borderInlineEnd: 'none' }}
         />
@@ -82,7 +146,22 @@ export default function AppLayout() {
             borderBottom: '1px solid #e8e8e8',
           }}
         >
-          <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a' }}>{activeLabel}</span>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', marginBottom: breadcrumbItems.length > 1 ? 2 : 0 }}>
+              {pageTitle}
+            </div>
+            {breadcrumbItems.length > 1 && (
+              <Breadcrumb
+                items={breadcrumbItems.map((c) => ({
+                  title: c.path ? (
+                    <a onClick={() => navigate(c.path!)} style={{ fontSize: 12 }}>{c.title}</a>
+                  ) : (
+                    <span style={{ fontSize: 12 }}>{c.title}</span>
+                  ),
+                }))}
+              />
+            )}
+          </div>
           <Dropdown
             menu={{
               items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: onLogout }],
