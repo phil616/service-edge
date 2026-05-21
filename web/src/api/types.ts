@@ -32,6 +32,8 @@ export interface CertInfo {
   expired: boolean
 }
 
+export type TransportProtocol = 'tcp' | 'kcp' | 'quic' | 'websocket' | 'wss'
+
 export interface FRPSNode {
   id: number
   uuid: string
@@ -39,6 +41,8 @@ export interface FRPSNode {
   bind_port: number
   dashboard_port?: number | null
   dashboard_user?: string
+  kcp_bind_port?: number | null
+  quic_bind_port?: number | null
   frp_version: string
   config_version: number
   status: 'pending' | 'online' | 'offline'
@@ -70,6 +74,7 @@ export interface FRPCClient {
   uuid: string
   name: string
   frps_uuid: string
+  protocol?: TransportProtocol
   frp_version: string
   config_version: number
   status: 'pending' | 'online' | 'offline'
@@ -83,7 +88,7 @@ export interface FRPCClient {
 
 export interface PortUse {
   port: number
-  kind: 'bind' | 'dashboard' | 'proxy' | 'host'
+  kind: 'bind' | 'dashboard' | 'proxy' | 'host' | 'kcp' | 'quic'
   frpc_uuid?: string
   frpc_name?: string
   proxy_name?: string

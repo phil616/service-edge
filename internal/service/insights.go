@@ -69,6 +69,12 @@ func (s *Service) PortUsage(frpsUUID string) ([]PortUse, error) {
 	if node.DashboardPort != nil {
 		out = append(out, PortUse{Port: *node.DashboardPort, Kind: "dashboard"})
 	}
+	if node.KCPBindPort != nil {
+		out = append(out, PortUse{Port: *node.KCPBindPort, Kind: "kcp"})
+	}
+	if node.QUICBindPort != nil {
+		out = append(out, PortUse{Port: *node.QUICBindPort, Kind: "quic"})
+	}
 
 	var clients []model.FRPCClient
 	if err := s.Store.DB.Where("frps_uuid = ?", frpsUUID).Find(&clients).Error; err != nil {

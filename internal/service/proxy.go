@@ -204,10 +204,7 @@ func setHostOccupancy(row *model.ProxyMapping, external map[int]bool) {
 
 // usedPortsTx computes the occupied remote ports within an existing tx.
 func usedPortsTx(tx *gorm.DB, frpsUUID string, node model.FRPSNode) (map[int]bool, error) {
-	used := map[int]bool{node.BindPort: true}
-	if node.DashboardPort != nil {
-		used[*node.DashboardPort] = true
-	}
+	used := nodeReservedPorts(node)
 	var clientUUIDs []string
 	if err := tx.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &clientUUIDs).Error; err != nil {
 		return nil, err

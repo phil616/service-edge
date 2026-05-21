@@ -56,6 +56,39 @@ func TestRenderFRPCConfigProxies(t *testing.T) {
 	}
 }
 
+func TestRenderTransportProtocols(t *testing.T) {
+	kcp, quic := 7000, 7001
+	node := &model.FRPSNode{UUID: "node-1", BindPort: 7000, FrpToken: "tok", KCPBindPort: &kcp, QUICBindPort: &quic}
+
+	frps := RenderFRPSConfig(node)
+	for _, want := range []string{"bindPort = 7000", "kcpBindPort = 7000", "quicBindPort = 7001"} {
+		if !strings.Contains(frps, want) {
+			t.Errorf("frps config missing %q\n%s", want, frps)
+		}
+	}
+
+	// kcp client dials the kcp UDP port; protocol line emitted.
+	kcpClient := &model.FRPCClient{UUID: "c-kcp", Protocol: "kcp"}
+	out := RenderFRPCConfig(kcpClient, node, "203.0.113.10", nil, "", "")
+	if !strings.Contains(out, `transport.protocol = "kcp"`) || !strings.Contains(out, "serverPort = 7000") {
+		t.Errorf("kcp frpc config wrong\n%s", out)
+	}
+
+	// quic client dials the quic UDP port.
+	quicClient := &model.FRPCClient{UUID: "c-quic", Protocol: "quic"}
+	out = RenderFRPCConfig(quicClient, node, "203.0.113.10", nil, "", "")
+	if !strings.Contains(out, `transport.protocol = "quic"`) || !strings.Contains(out, "serverPort = 7001") {
+		t.Errorf("quic frpc config wrong\n%s", out)
+	}
+
+	// tcp (default) dials bindPort and emits no protocol line.
+	tcpClient := &model.FRPCClient{UUID: "c-tcp", Protocol: "tcp"}
+	out = RenderFRPCConfig(tcpClient, node, "203.0.113.10", nil, "", "")
+	if strings.Contains(out, "transport.protocol") || !strings.Contains(out, "serverPort = 7000") {
+		t.Errorf("tcp frpc config wrong\n%s", out)
+	}
+}
+
 func TestRenderFRPCConfigSkipsInactive(t *testing.T) {
 	active, conflicting := 6022, 6023
 	client := &model.FRPCClient{UUID: "client-1"}

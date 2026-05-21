@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, InputNumber, Switch, Typography } from 'antd'
+import { Button, Card, Divider, Form, Input, InputNumber, Switch, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFRPS } from '../api/client'
@@ -8,6 +8,8 @@ export default function FRPSNew() {
   const qc = useQueryClient()
   const [form] = Form.useForm()
   const dashboardEnabled = Form.useWatch('dashboard_enabled', form)
+  const kcpEnabled = Form.useWatch('kcp_enabled', form)
+  const quicEnabled = Form.useWatch('quic_enabled', form)
 
   const create = useMutation({
     mutationFn: createFRPS,
@@ -29,6 +31,8 @@ export default function FRPSNew() {
       body.dashboard_user = values.dashboard_user
       body.dashboard_pwd = values.dashboard_pwd
     }
+    if (values.kcp_enabled) body.kcp_bind_port = values.kcp_bind_port
+    if (values.quic_enabled) body.quic_bind_port = values.quic_bind_port
     create.mutate(body)
   }
 
@@ -53,6 +57,29 @@ export default function FRPSNew() {
         <Form.Item name="frp_version" label="FRP 版本">
           <Input placeholder="v0.61.1" />
         </Form.Item>
+
+        <Divider orientation="left" plain>传输协议</Divider>
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          TCP / WebSocket / WSS 复用上面的服务端口，无需额外配置。如需更高抗丢包/低延迟，可启用 KCP 或 QUIC（基于 UDP，需在防火墙/安全组开放对应 UDP 端口）。
+        </Typography.Paragraph>
+        <Form.Item name="kcp_enabled" label="启用 KCP（UDP）" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        {kcpEnabled && (
+          <Form.Item name="kcp_bind_port" label="KCP 端口（UDP）" rules={[{ required: true }]} extra="可与服务端口相同">
+            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+          </Form.Item>
+        )}
+        <Form.Item name="quic_enabled" label="启用 QUIC（UDP）" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        {quicEnabled && (
+          <Form.Item name="quic_bind_port" label="QUIC 端口（UDP）" rules={[{ required: true }]} extra="必须与服务端口不同">
+            <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+          </Form.Item>
+        )}
+
+        <Divider orientation="left" plain>Dashboard</Divider>
         <Form.Item name="dashboard_enabled" label="启用 Dashboard" valuePropName="checked">
           <Switch />
         </Form.Item>

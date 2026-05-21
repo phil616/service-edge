@@ -3,6 +3,7 @@ import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createFRPC, frpsUsedPorts, listFRPS } from '../api/client'
+import { PROTOCOL_LABELS, nodeProtocols } from '../lib/transport'
 import type { ProxyInput } from '../api/types'
 
 const PROXY_TYPES = ['tcp', 'udp', 'http', 'https']
@@ -21,6 +22,8 @@ export default function FRPCNew() {
   })
 
   const onlineNodes = (nodes ?? []).filter((n) => n.status === 'online')
+  const selectedNode = (nodes ?? []).find((n) => n.uuid === selectedFrps)
+  const availableProtocols = nodeProtocols(selectedNode)
 
   const create = useMutation({
     mutationFn: createFRPC,
@@ -48,6 +51,7 @@ export default function FRPCNew() {
     create.mutate({
       name: values.name,
       frps_uuid: values.frps_uuid,
+      protocol: values.protocol || 'tcp',
       frp_version: values.frp_version || '',
       proxies,
     })
@@ -55,7 +59,7 @@ export default function FRPCNew() {
 
   return (
     <Card title={<Typography.Title level={4} style={{ margin: 0 }}>创建 FRPC 客户端</Typography.Title>}>
-      <Form form={form} layout="vertical" style={{ maxWidth: 820 }} initialValues={{ proxies: [{ proxy_type: 'tcp', local_ip: '127.0.0.1' }] }} onFinish={onFinish}>
+      <Form form={form} layout="vertical" style={{ maxWidth: 820 }} initialValues={{ protocol: 'tcp', proxies: [{ proxy_type: 'tcp', local_ip: '127.0.0.1' }] }} onFinish={onFinish}>
         <Row gutter={16}>
           <Col span={8}>
             <Form.Item name="name" label="客户端名称" rules={[{ required: true }]}>
@@ -76,6 +80,18 @@ export default function FRPCNew() {
             </Form.Item>
           </Col>
         </Row>
+
+        <Form.Item
+          name="protocol"
+          label="传输协议"
+          extra={selectedFrps ? '仅显示目标节点已启用的传输；KCP / QUIC 需节点开放对应 UDP 端口' : '请先选择目标节点'}
+        >
+          <Select
+            style={{ maxWidth: 240 }}
+            disabled={!selectedFrps}
+            options={availableProtocols.map((p) => ({ value: p, label: PROTOCOL_LABELS[p] }))}
+          />
+        </Form.Item>
 
         <Divider orientation="left">端口映射</Divider>
         <Form.List name="proxies">

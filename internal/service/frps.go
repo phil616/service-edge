@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -18,6 +19,8 @@ type CreateFRPSInput struct {
 	DashboardPort *int   `json:"dashboard_port"`
 	DashboardUser string `json:"dashboard_user"`
 	DashboardPwd  string `json:"dashboard_pwd"`
+	KCPBindPort   *int   `json:"kcp_bind_port"`
+	QUICBindPort  *int   `json:"quic_bind_port"`
 	FrpVersion    string `json:"frp_version"`
 	PublicIP      string `json:"public_ip"`
 }
@@ -29,8 +32,34 @@ type UpdateFRPSInput struct {
 	DashboardPort *int    `json:"dashboard_port"`
 	DashboardUser *string `json:"dashboard_user"`
 	DashboardPwd  *string `json:"dashboard_pwd"`
-	FrpVersion    *string `json:"frp_version"`
-	PublicIP      *string `json:"public_ip"`
+	// KCP/QUIC ports: a pointer is present when the field is sent. A null JSON
+	// value disables the transport; a number enables/changes it. To distinguish
+	// "absent" from "null" we use a wrapper.
+	KCPBindPort  optionalInt `json:"kcp_bind_port"`
+	QUICBindPort optionalInt `json:"quic_bind_port"`
+	FrpVersion   *string     `json:"frp_version"`
+	PublicIP     *string     `json:"public_ip"`
+}
+
+// optionalInt distinguishes an absent JSON field (Set=false) from an explicit
+// null (Set=true, Value=nil) so updates can clear a port vs. leave it unchanged.
+type optionalInt struct {
+	Set   bool
+	Value *int
+}
+
+func (o *optionalInt) UnmarshalJSON(b []byte) error {
+	o.Set = true
+	if string(b) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v int
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
 }
 
 func (s *Service) ListFRPS() ([]model.FRPSNode, error) {
@@ -53,6 +82,9 @@ func (s *Service) GetFRPS(uuid string) (*model.FRPSNode, error) {
 }
 
 func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
+	if err := validateNodeTransportPorts(in.BindPort, in.DashboardPort, in.KCPBindPort, in.QUICBindPort); err != nil {
+		return nil, err
+	}
 	version := in.FrpVersion
 	if version == "" {
 		version = s.Cfg.FrpRelease.DefaultVersion
@@ -76,6 +108,8 @@ func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
 		DashboardPort: in.DashboardPort,
 		DashboardUser: in.DashboardUser,
 		DashboardPwd:  in.DashboardPwd,
+		KCPBindPort:   in.KCPBindPort,
+		QUICBindPort:  in.QUICBindPort,
 		FrpToken:      util.RandomToken(32), // 64 hex chars
 		TLSCert:       cert.CertPEM,
 		TLSKey:        cert.KeyPEM,
@@ -121,6 +155,15 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 		if in.PublicIP != nil {
 			n.PublicIP = *in.PublicIP
 		}
+		if in.KCPBindPort.Set {
+			n.KCPBindPort = in.KCPBindPort.Value
+		}
+		if in.QUICBindPort.Set {
+			n.QUICBindPort = in.QUICBindPort.Value
+		}
+		if err := validateNodeTransportPorts(n.BindPort, n.DashboardPort, n.KCPBindPort, n.QUICBindPort); err != nil {
+			return err
+		}
 		n.ConfigVersion++
 		n.UpdatedAt = time.Now()
 		if err := tx.Save(&n).Error; err != nil {
@@ -165,10 +208,7 @@ func (s *Service) UsedRemotePorts(frpsUUID string) (map[int]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	used := map[int]bool{node.BindPort: true}
-	if node.DashboardPort != nil {
-		used[*node.DashboardPort] = true
-	}
+	used := nodeReservedPorts(*node)
 
 	var clientUUIDs []string
 	if err := s.Store.DB.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &clientUUIDs).Error; err != nil {

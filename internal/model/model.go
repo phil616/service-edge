@@ -45,7 +45,12 @@ type FRPSNode struct {
 	Status        string     `gorm:"default:pending" json:"status"`
 	LastHeartbeat *time.Time `gorm:"column:last_heartbeat" json:"last_heartbeat,omitempty"`
 	PublicIP      string     `gorm:"column:public_ip" json:"public_ip,omitempty"`
-	Runtime       AgentRuntime `gorm:"embedded" json:"runtime"`
+	// KCPBindPort / QUICBindPort enable the UDP-based KCP / QUIC control
+	// transports on frps. nil = that transport is disabled. TCP (bind_port) and
+	// websocket/wss (which ride bind_port) are always available.
+	KCPBindPort  *int         `gorm:"column:kcp_bind_port" json:"kcp_bind_port,omitempty"`
+	QUICBindPort *int         `gorm:"column:quic_bind_port" json:"quic_bind_port,omitempty"`
+	Runtime      AgentRuntime `gorm:"embedded" json:"runtime"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 
@@ -60,6 +65,9 @@ type FRPCClient struct {
 	FRPSUUID      string     `gorm:"column:frps_uuid;index;not null" json:"frps_uuid"`
 	TLSCert       string     `gorm:"column:tls_cert;not null" json:"-"`
 	TLSKey        string     `gorm:"column:tls_key;not null" json:"-"`
+	// Protocol is the frpc<->frps control transport: tcp (default) | kcp | quic |
+	// websocket | wss. kcp/quic require the target node to enable the matching port.
+	Protocol      string     `gorm:"column:protocol;not null;default:tcp" json:"protocol"`
 	FrpVersion    string     `gorm:"column:frp_version;not null" json:"frp_version"`
 	ConfigVersion int        `gorm:"column:config_version;default:1" json:"config_version"`
 	Status        string     `gorm:"default:pending" json:"status"`

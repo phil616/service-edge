@@ -14,6 +14,7 @@ import (
 type CreateFRPCInput struct {
 	Name       string             `json:"name" binding:"required"`
 	FRPSUUID   string             `json:"frps_uuid" binding:"required"`
+	Protocol   string             `json:"protocol"`
 	FrpVersion string             `json:"frp_version"`
 	Proxies    []ProxyMappingInput `json:"proxies"`
 }
@@ -21,6 +22,7 @@ type CreateFRPCInput struct {
 // UpdateFRPCInput updates mutable frpc fields.
 type UpdateFRPCInput struct {
 	Name       *string `json:"name"`
+	Protocol   *string `json:"protocol"`
 	FrpVersion *string `json:"frp_version"`
 }
 
@@ -64,6 +66,10 @@ func (s *Service) CreateFRPC(in CreateFRPCInput) (*model.FRPCClient, error) {
 		if version == "" {
 			version = node.FrpVersion
 		}
+		protocol, err := validateClientProtocol(node, in.Protocol)
+		if err != nil {
+			return err
+		}
 
 		uuid := util.NewUUID()
 		cert, err := s.CA.IssueClientCert(uuid)
@@ -74,6 +80,7 @@ func (s *Service) CreateFRPC(in CreateFRPCInput) (*model.FRPCClient, error) {
 			UUID:          uuid,
 			Name:          in.Name,
 			FRPSUUID:      in.FRPSUUID,
+			Protocol:      protocol,
 			TLSCert:       cert.CertPEM,
 			TLSKey:        cert.KeyPEM,
 			FrpVersion:    version,
@@ -125,6 +132,17 @@ func (s *Service) UpdateFRPC(uuid string, in UpdateFRPCInput) (*model.FRPCClient
 		}
 		if in.FrpVersion != nil {
 			c.FrpVersion = *in.FrpVersion
+		}
+		if in.Protocol != nil {
+			var node model.FRPSNode
+			if err := tx.Where("uuid = ?", c.FRPSUUID).First(&node).Error; err != nil {
+				return err
+			}
+			protocol, err := validateClientProtocol(node, *in.Protocol)
+			if err != nil {
+				return err
+			}
+			c.Protocol = protocol
 		}
 		c.ConfigVersion++
 		c.UpdatedAt = time.Now()

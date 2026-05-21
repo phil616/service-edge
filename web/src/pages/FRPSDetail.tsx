@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Row, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Col, Descriptions, Divider, Form, Input, InputNumber, Modal, Row, Space, Switch, Table, Tag, Typography } from 'antd'
 import { EditOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -10,6 +10,7 @@ import InstallCommand from '../components/InstallCommand'
 import HostRuntime from '../components/HostRuntime'
 import CertDescriptions from '../components/CertDescriptions'
 import AgentSyncInfo from '../components/AgentSyncInfo'
+import { PROTOCOL_LABELS, nodeProtocols } from '../lib/transport'
 import type { PortUse } from '../api/types'
 
 const KIND_LABEL: Record<string, { text: string; color: string }> = {
@@ -17,6 +18,8 @@ const KIND_LABEL: Record<string, { text: string; color: string }> = {
   dashboard: { text: 'Dashboard', color: 'purple' },
   proxy: { text: '映射', color: 'green' },
   host: { text: '主机占用(外部)', color: 'red' },
+  kcp: { text: 'KCP (UDP)', color: 'cyan' },
+  quic: { text: 'QUIC (UDP)', color: 'geekblue' },
 }
 
 export default function FRPSDetail() {
@@ -24,6 +27,8 @@ export default function FRPSDetail() {
   const qc = useQueryClient()
   const [editOpen, setEditOpen] = useState(false)
   const [form] = Form.useForm()
+  const kcpEnabled = Form.useWatch('kcp_enabled', form)
+  const quicEnabled = Form.useWatch('quic_enabled', form)
 
   const { data } = useQuery({
     queryKey: ['frps', uuid],
@@ -54,6 +59,10 @@ export default function FRPSDetail() {
       dashboard_port: data?.dashboard_port ?? undefined,
       dashboard_user: data?.dashboard_user || '',
       frp_version: data?.frp_version || '',
+      kcp_enabled: !!data?.kcp_bind_port,
+      kcp_bind_port: data?.kcp_bind_port ?? undefined,
+      quic_enabled: !!data?.quic_bind_port,
+      quic_bind_port: data?.quic_bind_port ?? undefined,
     })
     setEditOpen(true)
   }
@@ -67,6 +76,9 @@ export default function FRPSDetail() {
       dashboard_user: v.dashboard_user || '',
       dashboard_pwd: v.dashboard_pwd || undefined,
       frp_version: v.frp_version || '',
+      // null disables the transport; a number enables/changes it.
+      kcp_bind_port: v.kcp_enabled ? v.kcp_bind_port : null,
+      quic_bind_port: v.quic_enabled ? v.quic_bind_port : null,
     })
   }
 
@@ -105,6 +117,15 @@ export default function FRPSDetail() {
               {data?.public_ip ? <span className="mono">{data.public_ip}</span> : <Typography.Text type="warning">未设置</Typography.Text>}
             </Descriptions.Item>
             <Descriptions.Item label="Dashboard 端口">{data?.dashboard_port || '未启用'}</Descriptions.Item>
+            <Descriptions.Item label="支持传输">
+              {nodeProtocols(data).map((p) => (
+                <Tag key={p} color={p === 'kcp' ? 'cyan' : p === 'quic' ? 'geekblue' : 'default'}>
+                  {PROTOCOL_LABELS[p]}
+                  {p === 'kcp' && data?.kcp_bind_port ? ` :${data.kcp_bind_port}` : ''}
+                  {p === 'quic' && data?.quic_bind_port ? ` :${data.quic_bind_port}` : ''}
+                </Tag>
+              ))}
+            </Descriptions.Item>
             <Descriptions.Item label="FRP 版本"><Tag>{data?.frp_version}</Tag></Descriptions.Item>
             <Descriptions.Item label="配置版本">{data?.config_version}</Descriptions.Item>
             <Descriptions.Item label="最后心跳">
@@ -166,6 +187,27 @@ export default function FRPSDetail() {
           <Form.Item name="frp_version" label="FRP 版本">
             <Input placeholder="例如 0.61.1" />
           </Form.Item>
+
+          <Divider orientation="left" plain>传输协议</Divider>
+          <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+            TCP / WebSocket / WSS 复用服务端口。KCP / QUIC 基于 UDP，需在防火墙开放对应端口。关闭开关即停用该传输（仍在使用它的客户端需改用其他协议）。
+          </Typography.Paragraph>
+          <Form.Item name="kcp_enabled" label="启用 KCP（UDP）" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          {kcpEnabled && (
+            <Form.Item name="kcp_bind_port" label="KCP 端口（UDP）" rules={[{ required: true }]} extra="可与服务端口相同">
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+          )}
+          <Form.Item name="quic_enabled" label="启用 QUIC（UDP）" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          {quicEnabled && (
+            <Form.Item name="quic_bind_port" label="QUIC 端口（UDP）" rules={[{ required: true }]} extra="必须与服务端口不同">
+              <InputNumber min={1} max={65535} style={{ width: '100%' }} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </Row>

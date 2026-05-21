@@ -10,6 +10,7 @@ import InstallCommand from '../components/InstallCommand'
 import HostRuntime from '../components/HostRuntime'
 import CertDescriptions from '../components/CertDescriptions'
 import AgentSyncInfo from '../components/AgentSyncInfo'
+import { PROTOCOL_LABELS, nodeProtocols } from '../lib/transport'
 import type { ProxyMapping } from '../api/types'
 
 const PROXY_TYPES = ['tcp', 'udp', 'http', 'https']
@@ -117,7 +118,7 @@ export default function FRPCDetail() {
   }
 
   const openEditClient = () => {
-    clientForm.setFieldsValue({ name: data?.name, frp_version: data?.frp_version })
+    clientForm.setFieldsValue({ name: data?.name, protocol: data?.protocol || 'tcp', frp_version: data?.frp_version })
     setClientOpen(true)
   }
 
@@ -188,6 +189,9 @@ export default function FRPCDetail() {
             <Descriptions.Item label="UUID"><span className="mono">{data?.uuid}</span></Descriptions.Item>
             <Descriptions.Item label="状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
             <Descriptions.Item label="目标 FRPS">{node?.name ?? data?.frps_uuid}</Descriptions.Item>
+            <Descriptions.Item label="传输协议">
+              <Tag color="geekblue">{PROTOCOL_LABELS[data?.protocol ?? 'tcp']}</Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="FRP 版本">{data?.frp_version}</Descriptions.Item>
             <Descriptions.Item label="配置版本">{data?.config_version}</Descriptions.Item>
             <Descriptions.Item label="最后心跳">
@@ -286,6 +290,9 @@ export default function FRPCDetail() {
         <Form form={clientForm} layout="vertical" onFinish={(v) => updateClient.mutate(v)}>
           <Form.Item name="name" label="客户端名称" rules={[{ required: true }]}>
             <Input placeholder="例如 home-nas" />
+          </Form.Item>
+          <Form.Item name="protocol" label="传输协议" extra="KCP / QUIC 需目标节点已启用对应 UDP 端口">
+            <Select options={nodeProtocols(node).map((p) => ({ value: p, label: PROTOCOL_LABELS[p] }))} />
           </Form.Item>
           <Form.Item name="frp_version" label="FRP 版本" extra="留空跟随目标节点版本">
             <Input placeholder="例如 0.61.0" />

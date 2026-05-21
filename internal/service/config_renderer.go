@@ -16,7 +16,16 @@ import (
 func RenderFRPSConfig(node *model.FRPSNode) string {
 	p := frp.FRPSPaths()
 	var b strings.Builder
-	fmt.Fprintf(&b, "bindPort = %d\n\n", node.BindPort)
+	fmt.Fprintf(&b, "bindPort = %d\n", node.BindPort)
+	// Enable the UDP-based control transports the node offers. KCP may reuse the
+	// bindPort number; QUIC must be distinct (validated on write).
+	if node.KCPBindPort != nil {
+		fmt.Fprintf(&b, "kcpBindPort = %d\n", *node.KCPBindPort)
+	}
+	if node.QUICBindPort != nil {
+		fmt.Fprintf(&b, "quicBindPort = %d\n", *node.QUICBindPort)
+	}
+	b.WriteString("\n")
 	b.WriteString("auth.method = \"token\"\n")
 	fmt.Fprintf(&b, "auth.token = %q\n\n", node.FrpToken)
 	b.WriteString("transport.tls.force = true\n")
@@ -44,11 +53,17 @@ func RenderFRPSConfig(node *model.FRPSNode) string {
 // agent can read each proxy's real status (e.g. a remote_port that failed to bind).
 func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr string, proxies []model.ProxyMapping, adminUser, adminPassword string) string {
 	p := frp.FRPCPaths(client.UUID)
+	proto, _ := normalizeProtocol(client.Protocol)
 	var b strings.Builder
 	fmt.Fprintf(&b, "serverAddr = %q\n", serverAddr)
-	fmt.Fprintf(&b, "serverPort = %d\n\n", node.BindPort)
+	// serverPort depends on the transport: kcp/quic dial their UDP port, the rest
+	// ride the TCP bindPort.
+	fmt.Fprintf(&b, "serverPort = %d\n\n", serverPortFor(*node, proto))
 	b.WriteString("auth.method = \"token\"\n")
 	fmt.Fprintf(&b, "auth.token = %q\n\n", node.FrpToken)
+	if proto != ProtoTCP {
+		fmt.Fprintf(&b, "transport.protocol = %q\n", proto)
+	}
 	b.WriteString("transport.tls.enable = true\n")
 	fmt.Fprintf(&b, "transport.tls.certFile = %q\n", p.CertFile)
 	fmt.Fprintf(&b, "transport.tls.keyFile = %q\n", p.KeyFile)
