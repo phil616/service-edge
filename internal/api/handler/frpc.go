@@ -117,7 +117,9 @@ func (h *Handler) AddProxy(c *gin.Context) {
 }
 
 func (h *Handler) UpdateProxy(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	// Parse to 32 bits so the uint() conversion below can never truncate (Go's
+	// uint is >=32 bits); proxy ids are GORM auto-increment keys far below 2^32.
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
@@ -137,7 +139,9 @@ func (h *Handler) UpdateProxy(c *gin.Context) {
 }
 
 func (h *Handler) DeleteProxy(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	// Parse to 32 bits so the uint() conversion below can never truncate (Go's
+	// uint is >=32 bits); proxy ids are GORM auto-increment keys far below 2^32.
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
