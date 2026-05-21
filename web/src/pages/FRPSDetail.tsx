@@ -10,6 +10,7 @@ import InstallCommand from '../components/InstallCommand'
 import HostRuntime from '../components/HostRuntime'
 import CertDescriptions from '../components/CertDescriptions'
 import AgentSyncInfo from '../components/AgentSyncInfo'
+import DNSResolver from '../components/DNSResolver'
 import { PROTOCOL_LABELS, nodeProtocols } from '../lib/transport'
 import type { PortUse } from '../api/types'
 
@@ -170,6 +171,7 @@ export default function FRPSDetail() {
           <Form.Item name="public_ip" label="公网 IP" extra="frpc 连接此地址；留空将由 Agent 上线后自动识别">
             <Input allowClear placeholder="例如 203.0.113.10" />
           </Form.Item>
+          <DNSResolver onResolved={(ip) => form.setFieldValue('public_ip', ip)} />
           <Form.Item name="bind_port" label="服务端口 (bindPort)" rules={[{ required: true }]}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>

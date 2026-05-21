@@ -2,6 +2,7 @@ import { Button, Card, Divider, Form, Input, InputNumber, Switch, Typography } f
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createFRPS } from '../api/client'
+import DNSResolver from '../components/DNSResolver'
 
 export default function FRPSNew() {
   const navigate = useNavigate()
@@ -54,6 +55,7 @@ export default function FRPSNew() {
         <Form.Item name="public_ip" label="公网 IP（选填）" extra="用于生成 frpc 的连接地址与访问提示">
           <Input placeholder="例如 203.0.113.10" />
         </Form.Item>
+        <DNSResolver onResolved={(ip) => form.setFieldValue('public_ip', ip)} />
         <Form.Item name="frp_version" label="FRP 版本">
           <Input placeholder="v0.61.1" />
         </Form.Item>
