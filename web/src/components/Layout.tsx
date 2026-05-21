@@ -45,56 +45,48 @@ function resolveSelectedKey(pathname: string): string {
   return '/'
 }
 
-function resolvePageTitle(pathname: string): string {
-  if (pathname === '/frps') return 'FRPS 节点'
-  if (pathname === '/frps/new') return '新建 FRPS 节点'
-  if (pathname.startsWith('/frps/')) return 'FRPS 节点详情'
-  if (pathname === '/frpc') return 'FRPC 主机'
-  if (pathname === '/frpc/new') return '新建 FRPC 主机'
-  if (pathname.match(/^\/frpc\/[^/]+\/connections\/new$/)) return '新增连接'
-  if (pathname.startsWith('/frpc/')) return 'FRPC 主机详情'
-  if (pathname.startsWith('/connections/')) return '连接详情'
-  if (pathname === '/topology') return '网络拓扑'
-  if (pathname === '/audit-logs') return '审计日志'
-  if (pathname === '/settings') return '系统设置'
-  if (pathname === '/help') return '使用说明'
-  if (pathname === '/about') return '关于'
-  return '总览'
-}
-
 interface Crumb {
   title: string
   path?: string
 }
 
-function resolveBreadcrumbs(pathname: string): Crumb[] {
-  if (pathname === '/') return [{ title: '总览' }]
+// resolveNav is the single source of truth for the header: it returns the page
+// title together with the full breadcrumb trail whose LAST crumb always equals
+// the title, so the two can never diverge. The home crumb is included on every
+// non-root page; the leaf crumb is non-clickable (the current page).
+function resolveNav(pathname: string): { title: string; crumbs: Crumb[] } {
+  const home: Crumb = { title: '总览', path: '/' }
+  const trail = (title: string, ...mid: Crumb[]): { title: string; crumbs: Crumb[] } => ({
+    title,
+    crumbs: [home, ...mid, { title }],
+  })
 
-  if (pathname === '/topology') return [{ title: '总览', path: '/' }, { title: '网络拓扑' }]
-  if (pathname === '/audit-logs') return [{ title: '总览', path: '/' }, { title: '审计日志' }]
-  if (pathname === '/settings') return [{ title: '总览', path: '/' }, { title: '系统设置' }]
-  if (pathname === '/help') return [{ title: '总览', path: '/' }, { title: '使用说明' }]
-  if (pathname === '/about') return [{ title: '总览', path: '/' }, { title: '关于' }]
+  if (pathname === '/') return { title: '总览', crumbs: [] }
+  if (pathname === '/topology') return trail('网络拓扑')
+  if (pathname === '/audit-logs') return trail('审计日志')
+  if (pathname === '/settings') return trail('系统设置')
+  if (pathname === '/help') return trail('使用说明')
+  if (pathname === '/about') return trail('关于')
 
-  if (pathname.startsWith('/frps')) {
-    if (pathname === '/frps') return [{ title: 'FRPS 节点' }]
-    if (pathname === '/frps/new') return [{ title: 'FRPS 节点', path: '/frps' }, { title: '新建' }]
-    return [{ title: 'FRPS 节点', path: '/frps' }, { title: '详情' }]
+  if (pathname === '/frps') return trail('FRPS 节点')
+  if (pathname === '/frps/new') return trail('新建 FRPS 节点', { title: 'FRPS 节点', path: '/frps' })
+  if (pathname.startsWith('/frps/')) return trail('FRPS 节点详情', { title: 'FRPS 节点', path: '/frps' })
+
+  if (pathname === '/frpc') return trail('FRPC 主机')
+  if (pathname === '/frpc/new') return trail('新建 FRPC 主机', { title: 'FRPC 主机', path: '/frpc' })
+  const connNew = pathname.match(/^\/frpc\/([^/]+)\/connections\/new$/)
+  if (connNew) {
+    return trail(
+      '新增连接',
+      { title: 'FRPC 主机', path: '/frpc' },
+      { title: '主机详情', path: `/frpc/${connNew[1]}` },
+    )
   }
+  if (pathname.startsWith('/frpc/')) return trail('FRPC 主机详情', { title: 'FRPC 主机', path: '/frpc' })
 
-  if (pathname.startsWith('/frpc')) {
-    if (pathname === '/frpc') return [{ title: 'FRPC 主机' }]
-    if (pathname.match(/^\/frpc\/[^/]+\/connections\/new$/)) {
-      return [{ title: 'FRPC 主机', path: '/frpc' }, { title: '新增连接' }]
-    }
-    return [{ title: 'FRPC 主机', path: '/frpc' }, { title: '详情' }]
-  }
+  if (pathname.startsWith('/connections/')) return trail('连接详情', { title: 'FRPC 主机', path: '/frpc' })
 
-  if (pathname.startsWith('/connections/')) {
-    return [{ title: '连接详情' }]
-  }
-
-  return [{ title: '总览' }]
+  return { title: '总览', crumbs: [] }
 }
 
 export default function AppLayout() {
@@ -103,8 +95,7 @@ export default function AppLayout() {
   const { user, clear } = useAuth()
 
   const selectedKey = resolveSelectedKey(location.pathname)
-  const pageTitle = resolvePageTitle(location.pathname)
-  const breadcrumbItems = resolveBreadcrumbs(location.pathname)
+  const { title: pageTitle, crumbs } = resolveNav(location.pathname)
 
   const onLogout = async () => {
     try {
@@ -146,21 +137,23 @@ export default function AppLayout() {
             borderBottom: '1px solid #e8e8e8',
           }}
         >
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', marginBottom: breadcrumbItems.length > 1 ? 2 : 0 }}>
-              {pageTitle}
+          {/* Fixed-height breadcrumb line keeps the title's vertical position
+              identical across pages whether or not a breadcrumb is shown. */}
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <div style={{ height: 18, lineHeight: '18px' }}>
+              {crumbs.length > 0 && (
+                <Breadcrumb
+                  items={crumbs.map((c) => ({
+                    title: c.path ? (
+                      <a onClick={() => navigate(c.path!)} style={{ fontSize: 12 }}>{c.title}</a>
+                    ) : (
+                      <span style={{ fontSize: 12 }}>{c.title}</span>
+                    ),
+                  }))}
+                />
+              )}
             </div>
-            {breadcrumbItems.length > 1 && (
-              <Breadcrumb
-                items={breadcrumbItems.map((c) => ({
-                  title: c.path ? (
-                    <a onClick={() => navigate(c.path!)} style={{ fontSize: 12 }}>{c.title}</a>
-                  ) : (
-                    <span style={{ fontSize: 12 }}>{c.title}</span>
-                  ),
-                }))}
-              />
-            )}
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', lineHeight: '24px' }}>{pageTitle}</div>
           </div>
           <Dropdown
             menu={{
