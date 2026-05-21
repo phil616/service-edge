@@ -3,7 +3,7 @@ import { GithubOutlined, CopyrightOutlined, InfoCircleOutlined } from '@ant-desi
 
 const { Title, Paragraph, Text, Link } = Typography
 
-const VERSION = '0.1.0'
+import { version } from '../../package.json'
 const GITHUB_REPO = 'https://github.com/phil616/service-edge'
 const LICENSE = 'MIT'
 const COPYRIGHT = 'dreamreflex'
@@ -26,7 +26,7 @@ export default function About() {
             <tr>
               <td style={{ padding: '8px 16px 8px 0', whiteSpace: 'nowrap', color: 'rgba(0,0,0,0.45)' }}>版本</td>
               <td style={{ padding: '8px 0' }}>
-                <Text code>{VERSION}</Text>
+                <Text code>{version}</Text>
               </td>
             </tr>
             <tr>
