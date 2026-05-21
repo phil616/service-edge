@@ -68,7 +68,14 @@ func (h *Handler) AgentConfig(c *gin.Context) {
 			return true
 		}
 		if target > currentVersion {
-			bundle, err := h.Svc.BuildConfigResponse(atype, uuid, osName, arch)
+			var bundle any
+			var err error
+			if atype == "frpc" {
+				// frpc agents are hosts: deliver the full set of connections.
+				bundle, err = h.Svc.BuildHostConfig(uuid, osName, arch)
+			} else {
+				bundle, err = h.Svc.BuildConfigResponse(atype, uuid, osName, arch)
+			}
 			if err != nil {
 				respondErr(c, err)
 				return true

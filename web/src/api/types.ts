@@ -69,17 +69,35 @@ export interface ProxyMapping {
   created_at: string
 }
 
-export interface FRPCClient {
+// FRPCHost is a machine running the frpc agent (installed once); it owns many
+// connections, one frpc process each.
+export interface FRPCHost {
   id: number
   uuid: string
   name: string
-  frps_uuid: string
-  protocol?: TransportProtocol
   frp_version: string
   config_version: number
   status: 'pending' | 'online' | 'offline'
   last_heartbeat?: string | null
   runtime?: AgentRuntime
+  created_at: string
+  updated_at: string
+  connections?: FRPCConnection[]
+}
+
+// FRPCConnection is one frpc process: host -> one frps, with its own transport,
+// admin port and proxies.
+export interface FRPCConnection {
+  id: number
+  uuid: string
+  host_uuid: string
+  name: string
+  frps_uuid: string
+  protocol?: TransportProtocol
+  admin_port: number
+  config_version: number
+  status: 'pending' | 'online' | 'offline'
+  last_heartbeat?: string | null
   tls_cert_info?: CertInfo | null
   created_at: string
   updated_at: string
@@ -102,7 +120,7 @@ export interface PortAvailability {
 
 export interface Topology {
   frps: FRPSNode[]
-  frpc: FRPCClient[]
+  hosts: FRPCHost[]
 }
 
 export interface AgentDownloadSettings {

@@ -9,6 +9,8 @@ import FRPSDetail from './pages/FRPSDetail'
 import FRPCList from './pages/FRPCList'
 import FRPCNew from './pages/FRPCNew'
 import FRPCDetail from './pages/FRPCDetail'
+import ConnectionNew from './pages/ConnectionNew'
+import ConnectionDetail from './pages/ConnectionDetail'
 import AuditLogs from './pages/AuditLogs'
 import Settings from './pages/Settings'
 import Help from './pages/Help'
@@ -41,6 +43,8 @@ export default function App() {
         <Route path="frpc" element={<FRPCList />} />
         <Route path="frpc/new" element={<FRPCNew />} />
         <Route path="frpc/:uuid" element={<FRPCDetail />} />
+        <Route path="frpc/:hostUuid/connections/new" element={<ConnectionNew />} />
+        <Route path="connections/:uuid" element={<ConnectionDetail />} />
         <Route path="audit-logs" element={<AuditLogs />} />
         <Route path="settings" element={<Settings />} />
         <Route path="help" element={<Help />} />

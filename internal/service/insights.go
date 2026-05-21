@@ -22,11 +22,12 @@ func (s *Service) LeafCertInfo(certPEM string) *pki.CertInfo {
 	return info
 }
 
-// Topology bundles every frps node with every frpc client (and its proxies) so
-// the UI can render the full network/port relationship graph in one request.
+// Topology bundles every frps node with every frpc host (and its connections,
+// each with proxies) so the UI can render the full host→connection→frps graph
+// in one request.
 type Topology struct {
-	FRPS []model.FRPSNode   `json:"frps"`
-	FRPC []model.FRPCClient `json:"frpc"`
+	FRPS  []model.FRPSNode `json:"frps"`
+	Hosts []model.FRPCHost `json:"hosts"`
 }
 
 func (s *Service) Topology() (*Topology, error) {
@@ -34,18 +35,21 @@ func (s *Service) Topology() (*Topology, error) {
 	if err != nil {
 		return nil, err
 	}
-	clients, err := s.ListFRPC()
+	hosts, err := s.ListFRPCHosts()
 	if err != nil {
 		return nil, err
 	}
-	for i := range clients {
-		proxies, err := s.ListProxies(clients[i].UUID)
-		if err != nil {
-			return nil, err
+	// Attach proxies to each connection (ListFRPCHosts attaches bare connections).
+	for i := range hosts {
+		for j := range hosts[i].Connections {
+			proxies, err := s.ListProxies(hosts[i].Connections[j].UUID)
+			if err != nil {
+				return nil, err
+			}
+			hosts[i].Connections[j].Proxies = proxies
 		}
-		clients[i].Proxies = proxies
 	}
-	return &Topology{FRPS: nodes, FRPC: clients}, nil
+	return &Topology{FRPS: nodes, Hosts: hosts}, nil
 }
 
 // PortUse describes one occupied remote port on an frps node and what holds it.
@@ -76,11 +80,11 @@ func (s *Service) PortUsage(frpsUUID string) ([]PortUse, error) {
 		out = append(out, PortUse{Port: *node.QUICBindPort, Kind: "quic"})
 	}
 
-	var clients []model.FRPCClient
-	if err := s.Store.DB.Where("frps_uuid = ?", frpsUUID).Find(&clients).Error; err != nil {
+	var conns []model.FRPCConnection
+	if err := s.Store.DB.Where("frps_uuid = ?", frpsUUID).Find(&conns).Error; err != nil {
 		return nil, err
 	}
-	for _, c := range clients {
+	for _, c := range conns {
 		proxies, err := s.ListProxies(c.UUID)
 		if err != nil {
 			return nil, err

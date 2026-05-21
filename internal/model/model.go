@@ -57,22 +57,43 @@ type FRPSNode struct {
 	TLSCertInfo any `gorm:"-" json:"tls_cert_info,omitempty"`
 }
 
-// FRPCClient is an internal client running an frpc instance.
-type FRPCClient struct {
+// FRPCHost is a machine running the frpc agent. The agent is installed and
+// enrolled ONCE per host; the host then owns many FRPCConnections (one frpc
+// process each), so a single host can connect to multiple different frps.
+type FRPCHost struct {
+	ID            uint         `gorm:"primaryKey" json:"id"`
+	UUID          string       `gorm:"column:uuid;uniqueIndex;not null" json:"uuid"` // agent identity
+	Name          string       `gorm:"not null" json:"name"`
+	FrpVersion    string       `gorm:"column:frp_version;not null" json:"frp_version"`
+	ConfigVersion int          `gorm:"column:config_version;default:1" json:"config_version"` // aggregate
+	Status        string       `gorm:"default:pending" json:"status"`
+	LastHeartbeat *time.Time   `gorm:"column:last_heartbeat" json:"last_heartbeat,omitempty"`
+	Runtime       AgentRuntime `gorm:"embedded" json:"runtime"`
+	CreatedAt     time.Time    `json:"created_at"`
+	UpdatedAt     time.Time    `json:"updated_at"`
+
+	Connections []FRPCConnection `gorm:"-" json:"connections,omitempty"`
+}
+
+// FRPCConnection is one frpc process belonging to a host: it connects to exactly
+// one frps with its own transport protocol, client certificate, localhost admin
+// port and set of proxies. Its UUID is the systemd instance id
+// (service-edge-frpc@<uuid>) and the per-instance config directory.
+type FRPCConnection struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	UUID          string     `gorm:"column:uuid;uniqueIndex;not null" json:"uuid"`
+	HostUUID      string     `gorm:"column:host_uuid;index;not null" json:"host_uuid"`
 	Name          string     `gorm:"not null" json:"name"`
 	FRPSUUID      string     `gorm:"column:frps_uuid;index;not null" json:"frps_uuid"`
-	TLSCert       string     `gorm:"column:tls_cert;not null" json:"-"`
-	TLSKey        string     `gorm:"column:tls_key;not null" json:"-"`
 	// Protocol is the frpc<->frps control transport: tcp (default) | kcp | quic |
 	// websocket | wss. kcp/quic require the target node to enable the matching port.
 	Protocol      string     `gorm:"column:protocol;not null;default:tcp" json:"protocol"`
-	FrpVersion    string     `gorm:"column:frp_version;not null" json:"frp_version"`
+	AdminPort     int        `gorm:"column:admin_port;not null" json:"admin_port"` // localhost frpc admin API
+	TLSCert       string     `gorm:"column:tls_cert;not null" json:"-"`
+	TLSKey        string     `gorm:"column:tls_key;not null" json:"-"`
 	ConfigVersion int        `gorm:"column:config_version;default:1" json:"config_version"`
-	Status        string     `gorm:"default:pending" json:"status"`
+	Status        string     `gorm:"default:pending" json:"status"` // frp connection status
 	LastHeartbeat *time.Time `gorm:"column:last_heartbeat" json:"last_heartbeat,omitempty"`
-	Runtime       AgentRuntime `gorm:"embedded" json:"runtime"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 
@@ -135,7 +156,8 @@ func AllModels() []any {
 	return []any{
 		&User{},
 		&FRPSNode{},
-		&FRPCClient{},
+		&FRPCHost{},
+		&FRPCConnection{},
 		&ProxyMapping{},
 		&EnrollmentToken{},
 		&AuditLog{},

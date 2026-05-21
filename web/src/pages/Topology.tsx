@@ -20,7 +20,8 @@ import { useQuery } from '@tanstack/react-query'
 import { getTopology } from '../api/client'
 import HostRuntime from '../components/HostRuntime'
 import { archLabel } from '../lib/format'
-import type { FRPCClient, FRPSNode, ProxyMapping, Topology as TopologyData } from '../api/types'
+import { PROTOCOL_LABELS, protocolLabel } from '../lib/transport'
+import type { FRPCConnection, FRPCHost, FRPSNode, ProxyMapping, Topology as TopologyData } from '../api/types'
 
 const STATUS_COLOR: Record<string, string> = {
   online: '#52c41a',
@@ -29,33 +30,9 @@ const STATUS_COLOR: Record<string, string> = {
 }
 const STATUS_TEXT: Record<string, string> = { online: '在线', offline: '离线', pending: '待部署' }
 
-// ---- custom nodes ----
-
-function NodeShell({
-  icon,
-  title,
-  status,
-  lines,
-  accent,
-}: {
-  icon: React.ReactNode
-  title: string
-  status: string
-  lines: string[]
-  accent: string
-}) {
+function NodeShell({ icon, title, status, lines, accent }: { icon: React.ReactNode; title: string; status: string; lines: string[]; accent: string }) {
   return (
-    <div
-      style={{
-        width: 200,
-        borderRadius: 10,
-        border: `1px solid ${accent}`,
-        background: '#fff',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-        overflow: 'hidden',
-        fontSize: 12,
-      }}
-    >
+    <div style={{ width: 200, borderRadius: 10, border: `1px solid ${accent}`, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', overflow: 'hidden', fontSize: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: accent, color: '#fff', fontWeight: 600 }}>
         {icon}
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
@@ -80,88 +57,64 @@ function FrpsFlowNode({ data }: NodeProps) {
         title={n.name}
         status={n.status}
         accent="#1677ff"
-        lines={[
-          `公网 ${n.public_ip || '未设置'}`,
-          `端口 ${n.bind_port} · frp ${n.frp_version || '-'}`,
-          `${archLabel(n.runtime?.os, n.runtime?.arch)} · 连接 ${n.runtime?.active_connections ?? 0}`,
-        ]}
+        lines={[`公网 ${n.public_ip || '未设置'}`, `端口 ${n.bind_port} · frp ${n.frp_version || '-'}`, `${archLabel(n.runtime?.os, n.runtime?.arch)}`]}
       />
     </>
   )
 }
 
-function FrpcFlowNode({ data }: NodeProps) {
-  const c: FRPCClient = data.node
+function HostFlowNode({ data }: NodeProps) {
+  const h: FRPCHost = data.node
   return (
     <>
       <NodeShell
         icon={<ApiOutlined />}
-        title={c.name}
-        status={c.status}
+        title={h.name}
+        status={h.status}
         accent="#13a8a8"
-        lines={[
-          `${c.proxies?.length ?? 0} 个端口映射`,
-          `frp ${c.frp_version || '-'}`,
-          archLabel(c.runtime?.os, c.runtime?.arch),
-        ]}
+        lines={[`${h.connections?.length ?? 0} 个连接`, `frp ${h.frp_version || '-'}`, archLabel(h.runtime?.os, h.runtime?.arch)]}
       />
       <Handle type="source" position={Position.Right} style={{ background: '#13a8a8' }} />
     </>
   )
 }
 
-const nodeTypes = { frps: FrpsFlowNode, frpc: FrpcFlowNode }
+const nodeTypes = { frps: FrpsFlowNode, host: HostFlowNode }
 
-// ---- layout ----
-
+// buildGraph lays hosts on the left and frps on the right; each connection is one
+// edge from its host to its target frps — so a host with two connections to two
+// different frps shows two edges fanning out.
 function buildGraph(topo: TopologyData): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
-  const ROW = 150
-  const GAP = 50
-  let cursor = 0
+  const ROW = 140
 
-  for (const frps of topo.frps) {
-    const clients = topo.frpc.filter((c) => c.frps_uuid === frps.uuid)
-    const groupStart = cursor
-    const span = Math.max(clients.length, 1)
-
-    clients.forEach((c) => {
-      nodes.push({ id: `c-${c.uuid}`, type: 'frpc', position: { x: 60, y: cursor * ROW + 40 }, data: { node: c } })
+  topo.frps.forEach((frps, i) => {
+    nodes.push({ id: `s-${frps.uuid}`, type: 'frps', position: { x: 600, y: i * ROW + 40 }, data: { node: frps } })
+  })
+  topo.hosts.forEach((host, i) => {
+    nodes.push({ id: `h-${host.uuid}`, type: 'host', position: { x: 60, y: i * ROW + 40 }, data: { node: host } })
+    for (const conn of host.connections ?? []) {
+      const frps = topo.frps.find((s) => s.uuid === conn.frps_uuid)
+      if (!frps) continue
+      const online = conn.status === 'online'
       edges.push({
-        id: `e-${c.uuid}`,
-        source: `c-${c.uuid}`,
+        id: conn.uuid,
+        source: `h-${host.uuid}`,
         target: `s-${frps.uuid}`,
-        label: `${c.proxies?.length ?? 0} 映射`,
-        animated: c.status === 'online' && frps.status === 'online',
+        label: `${conn.name} · ${PROTOCOL_LABELS[conn.protocol ?? 'tcp']} · ${conn.proxies?.length ?? 0}映射`,
+        animated: online,
         markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: c.status === 'online' ? '#13a8a8' : '#bbb' },
+        style: { stroke: online ? '#13a8a8' : '#bbb' },
         labelStyle: { fontSize: 11 },
         labelBgPadding: [4, 2] as [number, number],
         labelBgStyle: { fill: '#f0fdfa' },
-        data: { frpc: c, frps },
+        data: { conn, host, frps },
       })
-      cursor += 1
-    })
-
-    const centerY = (groupStart + span / 2) * ROW + 40 - ROW / 2
-    nodes.push({ id: `s-${frps.uuid}`, type: 'frps', position: { x: 520, y: centerY }, data: { node: frps } })
-    cursor = groupStart + span
-    cursor += GAP / ROW // small gap between groups (fractional rows)
-    cursor = Math.ceil(cursor)
-  }
-
-  // Orphan frpc clients whose target frps no longer exists.
-  const orphans = topo.frpc.filter((c) => !topo.frps.some((s) => s.uuid === c.frps_uuid))
-  orphans.forEach((c) => {
-    nodes.push({ id: `c-${c.uuid}`, type: 'frpc', position: { x: 60, y: cursor * ROW + 40 }, data: { node: c } })
-    cursor += 1
+    }
   })
-
   return { nodes, edges }
 }
-
-// ---- access address helper ----
 
 function accessAddr(p: ProxyMapping, publicIP?: string): string {
   if ((p.proxy_type === 'tcp' || p.proxy_type === 'udp') && p.remote_port) {
@@ -179,17 +132,13 @@ function accessAddr(p: ProxyMapping, publicIP?: string): string {
 
 type Selection =
   | { kind: 'frps'; node: FRPSNode }
-  | { kind: 'frpc'; node: FRPCClient; frps?: FRPSNode }
-  | { kind: 'edge'; frpc: FRPCClient; frps: FRPSNode }
+  | { kind: 'host'; node: FRPCHost }
+  | { kind: 'edge'; conn: FRPCConnection; host: FRPCHost; frps: FRPSNode }
   | null
 
 export default function Topology() {
   const navigate = useNavigate()
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['topology'],
-    queryFn: getTopology,
-    refetchInterval: 15000,
-  })
+  const { data, isLoading, refetch, isFetching } = useQuery({ queryKey: ['topology'], queryFn: getTopology, refetchInterval: 15000 })
 
   const graph = useMemo(() => (data ? buildGraph(data) : { nodes: [], edges: [] }), [data])
   const [nodes, setNodes, onNodesChange] = useNodesState([])
@@ -201,24 +150,16 @@ export default function Topology() {
     setEdges(graph.edges)
   }, [graph, setNodes, setEdges])
 
-  const onNodeClick = useCallback(
-    (_: unknown, n: Node) => {
-      if (n.type === 'frps') {
-        setSel({ kind: 'frps', node: n.data.node })
-      } else {
-        const c: FRPCClient = n.data.node
-        const frps = data?.frps.find((s) => s.uuid === c.frps_uuid)
-        setSel({ kind: 'frpc', node: c, frps })
-      }
-    },
-    [data],
-  )
-
-  const onEdgeClick = useCallback((_: unknown, e: Edge) => {
-    if (e.data?.frpc && e.data?.frps) setSel({ kind: 'edge', frpc: e.data.frpc, frps: e.data.frps })
+  const onNodeClick = useCallback((_: unknown, n: Node) => {
+    if (n.type === 'frps') setSel({ kind: 'frps', node: n.data.node })
+    else setSel({ kind: 'host', node: n.data.node })
   }, [])
 
-  const empty = !isLoading && (data?.frps.length ?? 0) === 0 && (data?.frpc.length ?? 0) === 0
+  const onEdgeClick = useCallback((_: unknown, e: Edge) => {
+    if (e.data?.conn && e.data?.frps && e.data?.host) setSel({ kind: 'edge', conn: e.data.conn, host: e.data.host, frps: e.data.frps })
+  }, [])
+
+  const empty = !isLoading && (data?.frps.length ?? 0) === 0 && (data?.hosts.length ?? 0) === 0
 
   return (
     <Card
@@ -227,14 +168,14 @@ export default function Topology() {
       extra={
         <Space>
           <Tag color="#1677ff">FRPS 服务端</Tag>
-          <Tag color="#13a8a8">FRPC 客户端</Tag>
+          <Tag color="#13a8a8">FRPC 主机</Tag>
           <Button size="small" icon={<ReloadOutlined />} loading={isFetching} onClick={() => refetch()}>刷新</Button>
         </Space>
       }
     >
       <div style={{ height: 'calc(100vh - 220px)', minHeight: 480, position: 'relative' }}>
         {empty ? (
-          <Empty style={{ paddingTop: 120 }} description="暂无节点，请先创建 FRPS / FRPC" />
+          <Empty style={{ paddingTop: 120 }} description="暂无节点，请先创建 FRPS / FRPC 主机" />
         ) : (
           <ReactFlow
             nodes={nodes}
@@ -264,7 +205,7 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
   if (!sel) return <Drawer open={false} onClose={onClose} />
 
   if (sel.kind === 'edge') {
-    const { frpc, frps } = sel
+    const { conn, host, frps } = sel
     const cols = [
       { title: '名称', dataIndex: 'name' },
       { title: '协议', dataIndex: 'proxy_type', render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
@@ -272,9 +213,14 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
       { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r, frps.public_ip)}</span> },
     ]
     return (
-      <Drawer open width={560} onClose={onClose} title={`${frpc.name} → ${frps.name}`}>
-        <Typography.Paragraph type="secondary">该客户端通过此 FRPS 暴露的端口映射：</Typography.Paragraph>
-        <Table rowKey="id" size="small" pagination={false} dataSource={frpc.proxies ?? []} columns={cols} />
+      <Drawer open width={580} onClose={onClose} title={`${host.name} → ${frps.name}`} extra={<Button type="link" onClick={() => navigate(`/connections/${conn.uuid}`)}>打开连接</Button>}>
+        <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="连接">{conn.name}</Descriptions.Item>
+          <Descriptions.Item label="传输协议"><Tag color="geekblue">{PROTOCOL_LABELS[conn.protocol ?? 'tcp']}</Tag></Descriptions.Item>
+          <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[conn.status]}>{STATUS_TEXT[conn.status] ?? conn.status}</Tag></Descriptions.Item>
+        </Descriptions>
+        <Typography.Title level={5}>端口映射</Typography.Title>
+        <Table rowKey="id" size="small" pagination={false} dataSource={conn.proxies ?? []} columns={cols} />
       </Drawer>
     )
   }
@@ -282,19 +228,12 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
   if (sel.kind === 'frps') {
     const n = sel.node
     return (
-      <Drawer
-        open
-        width={520}
-        onClose={onClose}
-        title={n.name}
-        extra={<Button type="link" onClick={() => navigate(`/frps/${n.uuid}`)}>打开详情页</Button>}
-      >
+      <Drawer open width={520} onClose={onClose} title={n.name} extra={<Button type="link" onClick={() => navigate(`/frps/${n.uuid}`)}>打开详情页</Button>}>
         <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
           <Descriptions.Item label="类型">FRPS 服务端</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[n.status]}>{STATUS_TEXT[n.status] ?? n.status}</Tag></Descriptions.Item>
           <Descriptions.Item label="公网 IP"><span className="mono">{n.public_ip || '-'}</span></Descriptions.Item>
           <Descriptions.Item label="服务端口">{n.bind_port}</Descriptions.Item>
-          <Descriptions.Item label="Dashboard 端口">{n.dashboard_port || '未启用'}</Descriptions.Item>
           <Descriptions.Item label="frp 版本"><Tag>{n.frp_version || '-'}</Tag></Descriptions.Item>
         </Descriptions>
         <Typography.Title level={5}>主机运行环境</Typography.Title>
@@ -303,32 +242,25 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
     )
   }
 
-  // frpc
-  const c = sel.node
+  // host
+  const h = sel.node
   const cols = [
-    { title: '名称', dataIndex: 'name' },
-    { title: '协议', dataIndex: 'proxy_type', render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
-    { title: '本地', render: (_: unknown, r: ProxyMapping) => `${r.local_ip}:${r.local_port}` },
-    { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r, sel.frps?.public_ip)}</span> },
+    { title: '连接', dataIndex: 'name' },
+    { title: '传输', dataIndex: 'protocol', render: (v?: string) => <Tag color="geekblue">{protocolLabel(v)}</Tag> },
+    { title: '映射', render: (_: unknown, r: FRPCConnection) => r.proxies?.length ?? 0 },
+    { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={STATUS_COLOR[v]}>{STATUS_TEXT[v] ?? v}</Tag> },
   ]
   return (
-    <Drawer
-      open
-      width={560}
-      onClose={onClose}
-      title={c.name}
-      extra={<Button type="link" onClick={() => navigate(`/frpc/${c.uuid}`)}>打开详情页</Button>}
-    >
+    <Drawer open width={560} onClose={onClose} title={h.name} extra={<Button type="link" onClick={() => navigate(`/frpc/${h.uuid}`)}>打开主机</Button>}>
       <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
-        <Descriptions.Item label="类型">FRPC 客户端</Descriptions.Item>
-        <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[c.status]}>{STATUS_TEXT[c.status] ?? c.status}</Tag></Descriptions.Item>
-        <Descriptions.Item label="目标 FRPS">{sel.frps?.name ?? c.frps_uuid}</Descriptions.Item>
-        <Descriptions.Item label="frp 版本"><Tag>{c.frp_version || '-'}</Tag></Descriptions.Item>
+        <Descriptions.Item label="类型">FRPC 主机</Descriptions.Item>
+        <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[h.status]}>{STATUS_TEXT[h.status] ?? h.status}</Tag></Descriptions.Item>
+        <Descriptions.Item label="frp 版本"><Tag>{h.frp_version || '-'}</Tag></Descriptions.Item>
       </Descriptions>
-      <Typography.Title level={5}>端口映射</Typography.Title>
-      <Table rowKey="id" size="small" pagination={false} dataSource={c.proxies ?? []} columns={cols} style={{ marginBottom: 16 }} />
+      <Typography.Title level={5}>连接</Typography.Title>
+      <Table rowKey="uuid" size="small" pagination={false} dataSource={h.connections ?? []} columns={cols} style={{ marginBottom: 16 }} />
       <Typography.Title level={5}>主机运行环境</Typography.Title>
-      <HostRuntime runtime={c.runtime} />
+      <HostRuntime runtime={h.runtime} />
     </Drawer>
   )
 }

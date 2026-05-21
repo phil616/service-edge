@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"github.com/dreamreflex/service-edge/internal/model"
 	"github.com/dreamreflex/service-edge/internal/pki"
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -22,14 +24,14 @@ func (s *Service) CurrentConfigVersion(agentType, uuid string) (int, error) {
 		}
 		return node.ConfigVersion, nil
 	case "frpc":
-		var c model.FRPCClient
-		if err := s.Store.DB.Where("uuid = ?", uuid).First(&c).Error; err != nil {
+		var h model.FRPCHost
+		if err := s.Store.DB.Where("uuid = ?", uuid).First(&h).Error; err != nil {
 			if isNotFound(err) {
 				return 0, ErrNotFound
 			}
 			return 0, err
 		}
-		return c.ConfigVersion, nil
+		return h.ConfigVersion, nil
 	}
 	return 0, fmt.Errorf("unknown agent type %q", agentType)
 }
@@ -63,25 +65,34 @@ func (s *Service) MaybeRenewCert(agentType, uuid string) error {
 		}
 		s.Notifier.Publish(uuid)
 	case "frpc":
-		var c model.FRPCClient
-		if err := s.Store.DB.Where("uuid = ?", uuid).First(&c).Error; err != nil {
-			return err
-		}
-		if !pki.NeedsRenewal(c.TLSCert) {
-			return nil
-		}
-		cert, err := s.CA.IssueClientCert(uuid)
+		// uuid is the host; renew any of its connections' certs near expiry.
+		conns, err := s.ListConnectionsOfHost(uuid)
 		if err != nil {
 			return err
 		}
-		c.TLSCert = cert.CertPEM
-		c.TLSKey = cert.KeyPEM
-		c.ConfigVersion++
-		c.UpdatedAt = time.Now()
-		if err := s.Store.DB.Save(&c).Error; err != nil {
-			return err
+		bumped := false
+		for _, conn := range conns {
+			if !pki.NeedsRenewal(conn.TLSCert) {
+				continue
+			}
+			cert, err := s.CA.IssueClientCert(conn.UUID)
+			if err != nil {
+				return err
+			}
+			if err := s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ?", conn.UUID).
+				UpdateColumns(map[string]any{
+					"tls_cert":       cert.CertPEM,
+					"tls_key":        cert.KeyPEM,
+					"config_version": gorm.Expr("config_version + 1"),
+					"updated_at":     time.Now(),
+				}).Error; err != nil {
+				return err
+			}
+			bumped = true
 		}
-		s.Notifier.Publish(uuid)
+		if bumped {
+			s.bumpHost(uuid)
+		}
 	}
 	return nil
 }
@@ -108,12 +119,33 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 			TLSKey:        node.TLSKey,
 			CACert:        s.CA.CertPEM(),
 		}, nil
-	case "frpc":
-		client, err := s.GetFRPC(uuid)
-		if err != nil {
-			return nil, err
-		}
-		node, err := s.GetFRPS(client.FRPSUUID)
+	}
+	// frpc agents are hosts; they use BuildHostConfig (a bundle of connections).
+	return nil, fmt.Errorf("unsupported agent type %q for single config", agentType)
+}
+
+// BuildHostConfig assembles the multi-connection config bundle an frpc host's
+// agent reconciles: one ConnectionConfig per frpc process, each with its rendered
+// frpc.toml, certs and localhost admin port.
+func (s *Service) BuildHostConfig(hostUUID, osName, arch string) (*protocol.HostConfigResponse, error) {
+	if osName == "" {
+		osName = "linux"
+	}
+	if arch == "" {
+		arch = "amd64"
+	}
+	host, err := s.GetFRPCHost(hostUUID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &protocol.HostConfigResponse{
+		ConfigVersion: host.ConfigVersion,
+		FrpBinary:     s.frpBinary(host.FrpVersion, osName, arch),
+		CACert:        s.CA.CertPEM(),
+	}
+	for i := range host.Connections {
+		conn := host.Connections[i]
+		node, err := s.GetFRPS(conn.FRPSUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -121,17 +153,17 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 		if serverAddr == "" {
 			serverAddr = "frps-" + node.UUID // placeholder until public_ip is set
 		}
-		adminUser, adminPass := protocol.FRPCAdminCreds(client.UUID, s.Cfg.AgentAPIToken)
-		return &protocol.ConfigResponse{
-			ConfigVersion: client.ConfigVersion,
-			FrpBinary:     s.frpBinary(client.FrpVersion, osName, arch),
-			FrpConfig:     RenderFRPCConfig(client, node, serverAddr, client.Proxies, adminUser, adminPass),
-			TLSCert:       client.TLSCert,
-			TLSKey:        client.TLSKey,
-			CACert:        s.CA.CertPEM(),
-		}, nil
+		adminUser, adminPass := protocol.FRPCAdminCreds(conn.UUID, s.Cfg.AgentAPIToken)
+		resp.Connections = append(resp.Connections, protocol.ConnectionConfig{
+			UUID:          conn.UUID,
+			ConfigVersion: conn.ConfigVersion,
+			FrpConfig:     RenderFRPCConfig(&conn, node, serverAddr, conn.Proxies, adminUser, adminPass),
+			TLSCert:       conn.TLSCert,
+			TLSKey:        conn.TLSKey,
+			AdminPort:     conn.AdminPort,
+		})
 	}
-	return nil, fmt.Errorf("unknown agent type %q", agentType)
+	return resp, nil
 }
 
 // normalizeFrpVersion ensures the version string has a "v" prefix (the frp binary
@@ -183,7 +215,8 @@ func (s *Service) RecordHeartbeat(agentType, uuid string, alive bool) error {
 	return s.updateAgentLiveness(agentType, uuid, now, status)
 }
 
-// RecordStatus persists a detailed status report (currently liveness + version).
+// RecordStatus persists a detailed status report: host runtime for both agent
+// types, plus per-connection frp status for frpc hosts.
 func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusRequest) error {
 	now := time.Now()
 	status := "online"
@@ -194,37 +227,53 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 		return err
 	}
 	updates := map[string]any{
-		"rt_os":           req.SystemInfo.OS,
-		"rt_arch":         req.SystemInfo.Arch,
-		"rt_kernel":       req.SystemInfo.Kernel,
-		"rt_memory_mb":    req.SystemInfo.MemoryMB,
-		"rt_uptime_sec":   req.SystemInfo.UptimeS,
-		"rt_process_pid":  req.ProcessPID,
-		"rt_active_conns": req.FRPStatus.ActiveConnections,
-		"rt_last_error":   req.FRPStatus.LastError,
-		"rt_reported_at":  now,
+		"rt_os":          req.SystemInfo.OS,
+		"rt_arch":        req.SystemInfo.Arch,
+		"rt_kernel":      req.SystemInfo.Kernel,
+		"rt_memory_mb":   req.SystemInfo.MemoryMB,
+		"rt_uptime_sec":  req.SystemInfo.UptimeS,
+		"rt_last_error":  req.FRPStatus.LastError,
+		"rt_reported_at": now,
+	}
+	if agentType == "frps" {
+		updates["rt_process_pid"] = req.ProcessPID
+		updates["rt_active_conns"] = req.FRPStatus.ActiveConnections
+		if req.FrpVersion != "" {
+			updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
+		}
 	}
 	if req.ListeningPorts != nil {
 		if b, err := json.Marshal(req.ListeningPorts); err == nil {
 			updates["rt_listen_ports"] = string(b)
 		}
 	}
-	if req.FrpVersion != "" {
-		updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
-	}
 	s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates)
 
 	if agentType == "frpc" {
-		s.applyProxyStatuses(uuid, req.ProxyStatuses)
+		s.recordConnectionStatuses(uuid, now, req)
 	}
 	return nil
+}
+
+// recordConnectionStatuses updates each connection's liveness from the host's
+// per-connection report and reconciles proxy frp status.
+func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req protocol.StatusRequest) {
+	for _, cs := range req.Connections {
+		st := "online"
+		if !cs.ProcessAlive {
+			st = "offline"
+		}
+		s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ? AND host_uuid = ?", cs.UUID, hostUUID).
+			UpdateColumns(map[string]any{"status": st, "last_heartbeat": now, "updated_at": now})
+		s.applyProxyStatuses(cs.UUID, cs.ProxyStatuses)
+	}
 }
 
 // applyProxyStatuses reconciles ProxyMappings with the live frp status the frpc
 // agent reported. A proxy whose remote_port failed to bind on the frps host (frp
 // status "start error"/"check failed") is deactivated so it stops being pushed,
 // with the real frp error recorded for the user.
-func (s *Service) applyProxyStatuses(frpcUUID string, statuses []protocol.ProxyStatus) {
+func (s *Service) applyProxyStatuses(connUUID string, statuses []protocol.ProxyStatus) {
 	bumped := false
 	for _, st := range statuses {
 		if st.Status != "start error" && st.Status != "check failed" {
@@ -237,14 +286,14 @@ func (s *Service) applyProxyStatuses(frpcUUID string, statuses []protocol.ProxyS
 		reason += "；请更换远程端口或删除该映射"
 		// Only flip currently-active rows so we don't repeatedly bump the version.
 		res := s.Store.DB.Model(&model.ProxyMapping{}).
-			Where("frpc_uuid = ? AND name = ? AND inactive = ?", frpcUUID, st.Name, false).
+			Where("frpc_uuid = ? AND name = ? AND inactive = ?", connUUID, st.Name, false).
 			UpdateColumns(map[string]any{"inactive": true, "inactive_reason": reason})
 		if res.Error == nil && res.RowsAffected > 0 {
 			bumped = true
 		}
 	}
 	if bumped {
-		s.bumpFRPC(frpcUUID)
+		s.bumpConnection(connUUID)
 	}
 }
 
@@ -262,7 +311,7 @@ func (s *Service) ReapStaleAgents() int64 {
 	cutoff := time.Now().Add(-LivenessTimeout)
 	now := time.Now()
 	var total int64
-	for _, m := range []any{&model.FRPSNode{}, &model.FRPCClient{}} {
+	for _, m := range []any{&model.FRPSNode{}, &model.FRPCHost{}, &model.FRPCConnection{}} {
 		res := s.Store.DB.Model(m).
 			Where("status = ? AND (last_heartbeat IS NULL OR last_heartbeat < ?)", "online", cutoff).
 			UpdateColumns(map[string]any{"status": "offline", "updated_at": now})
@@ -289,5 +338,5 @@ func modelFor(agentType string) any {
 	if agentType == "frps" {
 		return &model.FRPSNode{}
 	}
-	return &model.FRPCClient{}
+	return &model.FRPCHost{}
 }

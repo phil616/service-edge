@@ -51,9 +51,9 @@ func RenderFRPSConfig(node *model.FRPSNode) string {
 // serverAddr is the public address frpc dials (node public IP or hostname).
 // When adminPassword is non-empty, frpc's localhost admin API is enabled so the
 // agent can read each proxy's real status (e.g. a remote_port that failed to bind).
-func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr string, proxies []model.ProxyMapping, adminUser, adminPassword string) string {
-	p := frp.FRPCPaths(client.UUID)
-	proto, _ := normalizeProtocol(client.Protocol)
+func RenderFRPCConfig(conn *model.FRPCConnection, node *model.FRPSNode, serverAddr string, proxies []model.ProxyMapping, adminUser, adminPassword string) string {
+	p := frp.FRPCPaths(conn.UUID)
+	proto, _ := normalizeProtocol(conn.Protocol)
 	var b strings.Builder
 	fmt.Fprintf(&b, "serverAddr = %q\n", serverAddr)
 	// serverPort depends on the transport: kcp/quic dial their UDP port, the rest
@@ -72,10 +72,11 @@ func RenderFRPCConfig(client *model.FRPCClient, node *model.FRPSNode, serverAddr
 	// node's public IP (which may change or be unknown at creation time).
 	fmt.Fprintf(&b, "transport.tls.serverName = %q\n\n", "frps-"+node.UUID)
 
-	// Localhost-only admin API for proxy status introspection.
+	// Localhost-only admin API for proxy status introspection. Each connection on
+	// a host uses a distinct admin port so multiple frpc processes don't collide.
 	if adminPassword != "" {
 		fmt.Fprintf(&b, "webServer.addr = %q\n", protocol.FRPCAdminAddr)
-		fmt.Fprintf(&b, "webServer.port = %d\n", protocol.FRPCAdminPort)
+		fmt.Fprintf(&b, "webServer.port = %d\n", conn.AdminPort)
 		fmt.Fprintf(&b, "webServer.user = %q\n", adminUser)
 		fmt.Fprintf(&b, "webServer.password = %q\n\n", adminPassword)
 	}

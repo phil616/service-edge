@@ -135,3 +135,38 @@ func (c *Client) PollConfig(ctx context.Context, currentVersion int, osName, arc
 		return nil, false, fmt.Errorf("config poll: status %d: %s", resp.StatusCode, string(b))
 	}
 }
+
+// PollHostConfig is the frpc-host variant: the long-poll returns the full set of
+// connections (frpc processes) the host must reconcile. notModified is true on 304.
+func (c *Client) PollHostConfig(ctx context.Context, currentVersion int, osName, arch string) (cfg *protocol.HostConfigResponse, notModified bool, err error) {
+	q := url.Values{}
+	q.Set("current_version", strconv.Itoa(currentVersion))
+	q.Set("os", osName)
+	q.Set("arch", arch)
+	u := c.endpoint + "/api/v1/agent/config?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	c.setHeaders(req)
+	resp, err := c.pollHTTP.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotModified:
+		return nil, true, nil
+	case http.StatusOK:
+		var out protocol.HostConfigResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, false, err
+		}
+		return &out, false, nil
+	default:
+		b, _ := io.ReadAll(resp.Body)
+		return nil, false, fmt.Errorf("host config poll: status %d: %s", resp.StatusCode, string(b))
+	}
+}

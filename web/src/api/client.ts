@@ -5,7 +5,8 @@ import type {
   AgentDownloadSettings,
   AuditLog,
   CertInfo,
-  FRPCClient,
+  FRPCConnection,
+  FRPCHost,
   FRPSNode,
   InstallCommandResponse,
   PortAvailability,
@@ -92,38 +93,59 @@ export async function frpsPortUsage(uuid: string) {
   return data.items ?? []
 }
 
-// ---- frpc ----
-export async function listFRPC() {
-  const { data } = await http.get<{ items: FRPCClient[] }>('/api/v1/frpc')
+// ---- frpc hosts ----
+export async function listFRPCHosts() {
+  const { data } = await http.get<{ items: FRPCHost[] }>('/api/v1/frpc-hosts')
   return data.items ?? []
 }
-export async function getFRPC(uuid: string) {
-  const { data } = await http.get<FRPCClient>(`/api/v1/frpc/${uuid}`)
+export async function getFRPCHost(uuid: string) {
+  const { data } = await http.get<FRPCHost>(`/api/v1/frpc-hosts/${uuid}`)
   return data
 }
-export async function createFRPC(body: Record<string, unknown>) {
-  const { data } = await http.post<FRPCClient>('/api/v1/frpc', body)
+export async function createFRPCHost(body: Record<string, unknown>) {
+  const { data } = await http.post<FRPCHost>('/api/v1/frpc-hosts', body)
   return data
 }
-export async function updateFRPC(uuid: string, body: Record<string, unknown>) {
-  const { data } = await http.put<FRPCClient>(`/api/v1/frpc/${uuid}`, body)
+export async function updateFRPCHost(uuid: string, body: Record<string, unknown>) {
+  const { data } = await http.put<FRPCHost>(`/api/v1/frpc-hosts/${uuid}`, body)
   return data
 }
-export async function deleteFRPC(uuid: string) {
-  await http.delete(`/api/v1/frpc/${uuid}`)
+export async function deleteFRPCHost(uuid: string) {
+  await http.delete(`/api/v1/frpc-hosts/${uuid}`)
 }
-export async function frpcInstallCommand(uuid: string) {
-  const { data } = await http.post<InstallCommandResponse>(`/api/v1/frpc/${uuid}/install-command`)
+export async function frpcHostInstallCommand(uuid: string) {
+  const { data } = await http.post<InstallCommandResponse>(`/api/v1/frpc-hosts/${uuid}/install-command`)
   return data
 }
 
-// ---- proxies ----
-export async function listProxies(frpcUUID: string) {
-  const { data } = await http.get<{ items: ProxyMapping[] }>(`/api/v1/frpc/${frpcUUID}/proxies`)
+// ---- frpc connections ----
+export async function listConnections(hostUUID: string) {
+  const { data } = await http.get<{ items: FRPCConnection[] }>(`/api/v1/frpc-hosts/${hostUUID}/connections`)
   return data.items ?? []
 }
-export async function addProxy(frpcUUID: string, body: ProxyInput) {
-  const { data } = await http.post<ProxyMapping>(`/api/v1/frpc/${frpcUUID}/proxies`, body)
+export async function createConnection(hostUUID: string, body: Record<string, unknown>) {
+  const { data } = await http.post<FRPCConnection>(`/api/v1/frpc-hosts/${hostUUID}/connections`, body)
+  return data
+}
+export async function getConnection(uuid: string) {
+  const { data } = await http.get<FRPCConnection>(`/api/v1/connections/${uuid}`)
+  return data
+}
+export async function updateConnection(uuid: string, body: Record<string, unknown>) {
+  const { data } = await http.put<FRPCConnection>(`/api/v1/connections/${uuid}`, body)
+  return data
+}
+export async function deleteConnection(uuid: string) {
+  await http.delete(`/api/v1/connections/${uuid}`)
+}
+
+// ---- proxies (belong to a connection) ----
+export async function listProxies(connUUID: string) {
+  const { data } = await http.get<{ items: ProxyMapping[] }>(`/api/v1/connections/${connUUID}/proxies`)
+  return data.items ?? []
+}
+export async function addProxy(connUUID: string, body: ProxyInput) {
+  const { data } = await http.post<ProxyMapping>(`/api/v1/connections/${connUUID}/proxies`, body)
   return data
 }
 export async function updateProxy(id: number, body: ProxyInput) {

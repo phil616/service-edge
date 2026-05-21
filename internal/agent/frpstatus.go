@@ -10,15 +10,15 @@ import (
 	"github.com/dreamreflex/service-edge/internal/protocol"
 )
 
-// queryProxyStatuses fetches per-proxy status from frpc's localhost admin API.
-// frpc only; returns nil for frps or when the admin API is unreachable (e.g.
-// before the first config with the admin server has been applied).
-func (r *Runner) queryProxyStatuses(ctx context.Context) []protocol.ProxyStatus {
-	if r.cfg.AgentType != "frpc" {
+// queryProxyStatusesFor fetches per-proxy status from one frpc connection's
+// localhost admin API (its dedicated admin port). Returns nil when unreachable
+// (e.g. before the connection's first config has been applied).
+func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adminPort int) []protocol.ProxyStatus {
+	if adminPort == 0 {
 		return nil
 	}
-	user, pass := protocol.FRPCAdminCreds(r.cfg.UUID, r.cfg.APIToken)
-	url := fmt.Sprintf("http://%s:%d/api/status", protocol.FRPCAdminAddr, protocol.FRPCAdminPort)
+	user, pass := protocol.FRPCAdminCreds(connUUID, r.cfg.APIToken)
+	url := fmt.Sprintf("http://%s:%d/api/status", protocol.FRPCAdminAddr, adminPort)
 
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

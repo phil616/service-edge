@@ -71,10 +71,12 @@ type StatusRequest struct {
 	// The control plane uses these to detect remote_port conflicts caused by
 	// processes outside service-edge (it cannot probe hosts itself).
 	ListeningPorts []int `json:"listening_ports,omitempty"`
-	// ProxyStatuses is the live per-proxy status from frpc's admin API (frpc
-	// agents only). The control plane uses it to flag proxies whose remote_port
-	// failed to bind on the frps host.
+	// ProxyStatuses is the live per-proxy status from frpc's admin API (frps
+	// agents leave this empty). DEPRECATED for frpc hosts — see Connections.
 	ProxyStatuses []ProxyStatus `json:"proxy_statuses,omitempty"`
+	// Connections carries per-connection frp status for frpc hosts (one entry per
+	// managed frpc process).
+	Connections []ConnectionStatus `json:"connections,omitempty"`
 }
 
 // FrpBinary tells the agent which frp release to install.
@@ -84,7 +86,8 @@ type FrpBinary struct {
 	SHA256      string `json:"sha256,omitempty"`
 }
 
-// ConfigResponse is the long-poll payload delivered when a newer config exists.
+// ConfigResponse is the long-poll payload delivered when a newer config exists
+// (frps agents — a single frp process).
 type ConfigResponse struct {
 	ConfigVersion int       `json:"config_version"`
 	FrpBinary     FrpBinary `json:"frp_binary"`
@@ -92,6 +95,34 @@ type ConfigResponse struct {
 	TLSCert       string    `json:"tls_cert"`
 	TLSKey        string    `json:"tls_key"`
 	CACert        string    `json:"ca_cert"`
+}
+
+// ConnectionConfig is one frpc process's config inside a host bundle.
+type ConnectionConfig struct {
+	UUID          string `json:"uuid"`
+	ConfigVersion int    `json:"config_version"`
+	FrpConfig     string `json:"frp_config"`
+	TLSCert       string `json:"tls_cert"`
+	TLSKey        string `json:"tls_key"`
+	AdminPort     int    `json:"admin_port"`
+}
+
+// HostConfigResponse is the long-poll payload for an frpc host: the full set of
+// connections (frpc processes) the host's agent must reconcile. The shared frp
+// binary and CA cert are delivered once at the host level.
+type HostConfigResponse struct {
+	ConfigVersion int                `json:"config_version"`
+	FrpBinary     FrpBinary          `json:"frp_binary"`
+	CACert        string             `json:"ca_cert"`
+	Connections   []ConnectionConfig `json:"connections"`
+}
+
+// ConnectionStatus is one frpc connection's live state, reported by an frpc host.
+type ConnectionStatus struct {
+	UUID          string        `json:"uuid"`
+	ProcessAlive  bool          `json:"process_alive"`
+	ProcessPID    int           `json:"process_pid"`
+	ProxyStatuses []ProxyStatus `json:"proxy_statuses,omitempty"`
 }
 
 // AckRequest reports the result of applying a config version.

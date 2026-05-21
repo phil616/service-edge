@@ -114,7 +114,7 @@ func (h *Handler) installCommand(c *gin.Context, targetType string) {
 	if targetType == "frps" {
 		_, err = h.Svc.GetFRPS(uuid)
 	} else {
-		_, err = h.Svc.GetFRPC(uuid)
+		_, err = h.Svc.GetFRPCHost(uuid)
 	}
 	if err != nil {
 		respondErr(c, err)

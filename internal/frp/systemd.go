@@ -19,8 +19,9 @@ func (Systemd) run(args ...string) (string, error) {
 	return string(out), nil
 }
 
-func (s Systemd) DaemonReload() error      { _, err := s.run("daemon-reload"); return err }
-func (s Systemd) Enable(unit string) error { _, err := s.run("enable", unit); return err }
+func (s Systemd) DaemonReload() error       { _, err := s.run("daemon-reload"); return err }
+func (s Systemd) Enable(unit string) error  { _, err := s.run("enable", unit); return err }
+func (s Systemd) Disable(unit string) error { _, err := s.run("disable", unit); return err }
 func (s Systemd) Start(unit string) error  { _, err := s.run("start", unit); return err }
 func (s Systemd) Stop(unit string) error   { _, err := s.run("stop", unit); return err }
 func (s Systemd) Restart(unit string) error { _, err := s.run("restart", unit); return err }

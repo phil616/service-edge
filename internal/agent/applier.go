@@ -29,6 +29,16 @@ func NewApplier(cfg *Config) *Applier {
 	}
 }
 
+// NewConnectionApplier builds an applier for one frpc connection on a host: its
+// per-instance config directory and templated systemd unit service-edge-frpc@<uuid>.
+func NewConnectionApplier(connUUID, binaryPath string) *Applier {
+	return &Applier{
+		paths:  frp.FRPCPaths(connUUID),
+		binary: binaryPath,
+		unit:   fmt.Sprintf("%s@%s", frp.FRPCSystemdUnit, connUUID),
+	}
+}
+
 // Apply implements the config-application flow from the design: stage to .new,
 // verify, back up, atomic swap, reload, settle-check, rollback on failure.
 func (a *Applier) Apply(bundle *protocol.ConfigResponse) error {

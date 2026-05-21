@@ -12,33 +12,39 @@ import (
 	"github.com/dreamreflex/service-edge/internal/protocol"
 )
 
-// Runner is the agent's top-level coordinator running the four concurrent loops.
+// Runner is the agent's top-level coordinator. An frps agent manages a single frp
+// process; an frpc agent is a HOST that reconciles many frpc connection processes.
 type Runner struct {
 	cfg     *Config
 	client  *Client
 	state   *State
-	applier *Applier
 	systemd frp.Systemd
+
+	// frps-only: the single managed unit + its applier.
+	applier *Applier
 	unit    string
 }
 
 func NewRunner(cfg *Config) *Runner {
-	statePath := filepath.Join(cfg.Paths().DataDir, "state.json")
-	return &Runner{
-		cfg:     cfg,
-		client:  NewClient(cfg),
-		state:   LoadState(statePath),
-		applier: NewApplier(cfg),
-		unit:    cfg.ServiceUnit(),
+	r := &Runner{cfg: cfg, client: NewClient(cfg)}
+	if cfg.AgentType == "frps" {
+		r.state = LoadState(filepath.Join(cfg.Paths().DataDir, "state.json"))
+		r.applier = NewApplier(cfg)
+		r.unit = cfg.ServiceUnit()
+	} else {
+		// frpc host: state lives at the host data dir; instances are per-connection.
+		r.state = LoadState(filepath.Join(frp.FRPCBaseDir, "data", "state.json"))
 	}
+	return r
 }
 
 // Run starts all loops and blocks until ctx is cancelled.
 func (r *Runner) Run(ctx context.Context) {
-	slog.Info("agent starting", "type", r.cfg.AgentType, "uuid", r.cfg.UUID, "unit", r.unit)
-	// Persist the frp unit across reboots (best effort; no-op without systemd).
-	if err := r.systemd.Enable(r.unit); err != nil {
-		slog.Debug("enable frp unit failed (continuing)", "unit", r.unit, "err", err)
+	slog.Info("agent starting", "type", r.cfg.AgentType, "uuid", r.cfg.UUID)
+	if r.cfg.AgentType == "frps" {
+		if err := r.systemd.Enable(r.unit); err != nil {
+			slog.Debug("enable frp unit failed (continuing)", "unit", r.unit, "err", err)
+		}
 	}
 	var wg sync.WaitGroup
 	for _, loop := range []func(context.Context){
@@ -57,7 +63,15 @@ func (r *Runner) Run(ctx context.Context) {
 	slog.Info("agent stopped")
 }
 
-func (r *Runner) processAlive() bool { return r.systemd.IsActive(r.unit) }
+// heartbeatAlive reports whether the managed frp is alive. For an frpc host the
+// agent process itself being alive is the liveness signal (per-connection state
+// is reported in status); for frps it's the single unit's activity.
+func (r *Runner) heartbeatAlive() bool {
+	if r.cfg.AgentType == "frps" {
+		return r.systemd.IsActive(r.unit)
+	}
+	return true
+}
 
 // heartbeatLoop pings liveness frequently; failures are logged, never fatal.
 func (r *Runner) heartbeatLoop(ctx context.Context) {
@@ -69,7 +83,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			if err := r.client.Heartbeat(cctx, r.state.Version(), r.processAlive()); err != nil {
+			if err := r.client.Heartbeat(cctx, r.state.Version(), r.heartbeatAlive()); err != nil {
 				slog.Debug("heartbeat failed", "err", err)
 			}
 			cancel()
@@ -92,19 +106,21 @@ func (r *Runner) statusLoop(ctx context.Context) {
 	}
 }
 
-// reportStatus sends one detailed status report (host facts, listening ports and,
-// for frpc, live per-proxy frp status).
+// reportStatus dispatches to the frps single-process or frpc host reporter.
 func (r *Runner) reportStatus(ctx context.Context) {
+	if r.cfg.AgentType == "frpc" {
+		r.reportHostStatus(ctx)
+		return
+	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req := protocol.StatusRequest{
 		ConfigVersion:  r.state.Version(),
-		ProcessAlive:   r.processAlive(),
+		ProcessAlive:   r.systemd.IsActive(r.unit),
 		ProcessPID:     r.systemd.MainPID(r.unit),
 		FrpVersion:     frp.FrpVersion(r.cfg.FrpBinaryPath),
 		SystemInfo:     collectSystemInfo(),
 		ListeningPorts: collectListeningPorts(),
-		ProxyStatuses:  r.queryProxyStatuses(cctx),
 	}
 	if err := r.client.ReportStatus(cctx, req); err != nil {
 		slog.Debug("status report failed", "err", err)
@@ -120,6 +136,25 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if r.cfg.AgentType == "frpc" {
+			bundle, notModified, err := r.client.PollHostConfig(ctx, r.state.Version(), runtime.GOOS, runtime.GOARCH)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				slog.Warn("config poll error, backing off", "err", err, "backoff", backoff)
+				sleepCtx(ctx, backoff)
+				backoff = nextBackoff(backoff)
+				continue
+			}
+			backoff = time.Second
+			if notModified {
+				continue
+			}
+			r.reconcile(ctx, bundle)
+			continue
 		}
 
 		bundle, notModified, err := r.client.PollConfig(ctx, r.state.Version(), runtime.GOOS, runtime.GOARCH)
@@ -164,9 +199,12 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 	r.ack(ctx, bundle.ConfigVersion, true, "")
 	slog.Info("config applied", "version", bundle.ConfigVersion)
 
-	// Report status promptly so the control plane learns the new proxies' real
-	// frp state (e.g. a remote_port that failed to bind) without waiting a full
-	// status interval. The frp process needs a moment to (re)register proxies.
+	r.scheduleStatusReport(ctx)
+}
+
+// scheduleStatusReport reports status shortly after a config apply so the control
+// plane learns the new frp state without waiting a full status interval.
+func (r *Runner) scheduleStatusReport(ctx context.Context) {
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -184,7 +222,7 @@ func (r *Runner) ack(ctx context.Context, version int, ok bool, errMsg string) {
 	}
 }
 
-// watchdogLoop keeps the frp process alive once a config has been applied,
+// watchdogLoop keeps managed frp processes alive once a config has been applied,
 // throttled to at most 3 restarts per 5 minutes.
 func (r *Runner) watchdogLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
@@ -198,22 +236,37 @@ func (r *Runner) watchdogLoop(ctx context.Context) {
 			if r.state.Version() == 0 {
 				continue // nothing applied yet
 			}
-			if r.processAlive() {
-				continue
+			units := r.managedUnits()
+			for _, unit := range units {
+				if r.systemd.IsActive(unit) {
+					continue
+				}
+				now := time.Now()
+				restarts = pruneOld(restarts, now.Add(-5*time.Minute))
+				if len(restarts) >= 3 {
+					slog.Error("frp restart threshold reached, backing off", "unit", unit)
+					continue
+				}
+				slog.Warn("frp not running, restarting", "unit", unit)
+				if err := r.systemd.Restart(unit); err != nil {
+					slog.Error("watchdog restart failed", "unit", unit, "err", err)
+				}
+				restarts = append(restarts, now)
 			}
-			now := time.Now()
-			restarts = pruneOld(restarts, now.Add(-5*time.Minute))
-			if len(restarts) >= 3 {
-				slog.Error("frp restart threshold reached, backing off", "unit", r.unit)
-				continue
-			}
-			slog.Warn("frp not running, restarting", "unit", r.unit)
-			if err := r.systemd.Restart(r.unit); err != nil {
-				slog.Error("watchdog restart failed", "err", err)
-			}
-			restarts = append(restarts, now)
 		}
 	}
+}
+
+// managedUnits is the set of frp systemd units this agent keeps alive.
+func (r *Runner) managedUnits() []string {
+	if r.cfg.AgentType == "frps" {
+		return []string{r.unit}
+	}
+	var units []string
+	for _, uuid := range r.state.ConnUUIDs() {
+		units = append(units, frpcUnit(uuid))
+	}
+	return units
 }
 
 func pruneOld(times []time.Time, cutoff time.Time) []time.Time {

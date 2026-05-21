@@ -59,15 +59,22 @@ func NewRouter(o Options) *gin.Engine {
 		authed.GET("/frps/:uuid/available-ports", o.Handler.AvailablePorts)
 		authed.GET("/frps/:uuid/port-usage", o.Handler.PortUsage)
 
-		authed.GET("/frpc", o.Handler.ListFRPC)
-		authed.POST("/frpc", o.Handler.CreateFRPC)
-		authed.GET("/frpc/:uuid", o.Handler.GetFRPC)
-		authed.PUT("/frpc/:uuid", o.Handler.UpdateFRPC)
-		authed.DELETE("/frpc/:uuid", o.Handler.DeleteFRPC)
-		authed.POST("/frpc/:uuid/install-command", o.Handler.InstallCommandFRPC)
-		authed.GET("/frpc/:uuid/status", o.Handler.FRPCStatus)
-		authed.GET("/frpc/:uuid/proxies", o.Handler.ListProxies)
-		authed.POST("/frpc/:uuid/proxies", o.Handler.AddProxy)
+		// frpc hosts (the agent is installed once per host).
+		authed.GET("/frpc-hosts", o.Handler.ListFRPCHosts)
+		authed.POST("/frpc-hosts", o.Handler.CreateFRPCHost)
+		authed.GET("/frpc-hosts/:uuid", o.Handler.GetFRPCHost)
+		authed.PUT("/frpc-hosts/:uuid", o.Handler.UpdateFRPCHost)
+		authed.DELETE("/frpc-hosts/:uuid", o.Handler.DeleteFRPCHost)
+		authed.POST("/frpc-hosts/:uuid/install-command", o.Handler.InstallCommandFRPCHost)
+		authed.GET("/frpc-hosts/:uuid/connections", o.Handler.ListConnections)
+		authed.POST("/frpc-hosts/:uuid/connections", o.Handler.CreateConnection)
+
+		// frpc connections (one frpc process to one frps) and their proxies.
+		authed.GET("/connections/:uuid", o.Handler.GetConnection)
+		authed.PUT("/connections/:uuid", o.Handler.UpdateConnection)
+		authed.DELETE("/connections/:uuid", o.Handler.DeleteConnection)
+		authed.GET("/connections/:uuid/proxies", o.Handler.ListProxies)
+		authed.POST("/connections/:uuid/proxies", o.Handler.AddProxy)
 
 		authed.PUT("/proxies/:id", o.Handler.UpdateProxy)
 		authed.DELETE("/proxies/:id", o.Handler.DeleteProxy)

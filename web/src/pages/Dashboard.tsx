@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getCAInfo, getTopology } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import { archLabel, formatUptime } from '../lib/format'
-import type { FRPCClient, FRPSNode } from '../api/types'
+import type { FRPCHost, FRPSNode } from '../api/types'
 
 const { Title } = Typography
 
@@ -15,11 +15,12 @@ export default function Dashboard() {
   const ca = useQuery({ queryKey: ['ca'], queryFn: getCAInfo })
 
   const nodes = topo.data?.frps ?? []
-  const clients = topo.data?.frpc ?? []
+  const hosts = topo.data?.hosts ?? []
   const onlineNodes = nodes.filter((n) => n.status === 'online').length
-  const onlineClients = clients.filter((c) => c.status === 'online').length
-  const totalProxies = clients.reduce((sum, c) => sum + (c.proxies?.length ?? 0), 0)
-  const activeConns = [...nodes, ...clients].reduce((sum, x) => sum + (x.runtime?.active_connections ?? 0), 0)
+  const onlineHosts = hosts.filter((h) => h.status === 'online').length
+  const totalConns = hosts.reduce((sum, h) => sum + (h.connections?.length ?? 0), 0)
+  const totalProxies = hosts.reduce((sum, h) => sum + (h.connections ?? []).reduce((s, c) => s + (c.proxies?.length ?? 0), 0), 0)
+  const activeConns = nodes.reduce((sum, n) => sum + (n.runtime?.active_connections ?? 0), 0)
 
   const caInfo = ca.data
   const caExpiryColor = !caInfo ? 'default' : caInfo.expired ? '#cf1322' : caInfo.days_remaining <= 60 ? '#d46b08' : '#3f8600'
@@ -35,13 +36,13 @@ export default function Dashboard() {
     { title: '连接数', render: (_: unknown, r: FRPSNode) => r.runtime?.active_connections ?? 0 },
   ]
 
-  const frpcColumns = [
-    { title: '名称', dataIndex: 'name', render: (v: string, r: FRPCClient) => <a onClick={() => navigate(`/frpc/${r.uuid}`)}>{v}</a> },
+  const hostColumns = [
+    { title: '名称', dataIndex: 'name', render: (v: string, r: FRPCHost) => <a onClick={() => navigate(`/frpc/${r.uuid}`)}>{v}</a> },
     { title: '状态', dataIndex: 'status', render: (v: string) => <StatusBadge status={v} /> },
-    { title: '映射数', render: (_: unknown, r: FRPCClient) => r.proxies?.length ?? 0 },
+    { title: '连接数', render: (_: unknown, r: FRPCHost) => r.connections?.length ?? 0 },
     { title: 'frp 版本', dataIndex: 'frp_version', render: (v: string) => <Tag>{v || '-'}</Tag> },
-    { title: '系统/架构', render: (_: unknown, r: FRPCClient) => archLabel(r.runtime?.os, r.runtime?.arch) },
-    { title: '运行时长', render: (_: unknown, r: FRPCClient) => formatUptime(r.runtime?.uptime_sec) },
+    { title: '系统/架构', render: (_: unknown, r: FRPCHost) => archLabel(r.runtime?.os, r.runtime?.arch) },
+    { title: '运行时长', render: (_: unknown, r: FRPCHost) => formatUptime(r.runtime?.uptime_sec) },
   ]
 
   return (
@@ -55,12 +56,12 @@ export default function Dashboard() {
         </Col>
         <Col xs={12} md={6}>
           <Card>
-            <Statistic title="FRPC 客户端" value={clients.length} prefix={<ApiOutlined />} suffix={`/ 在线 ${onlineClients}`} />
+            <Statistic title="FRPC 主机" value={hosts.length} prefix={<ApiOutlined />} suffix={`/ 在线 ${onlineHosts}`} />
           </Card>
         </Col>
         <Col xs={12} md={6}>
           <Card>
-            <Statistic title="端口映射总数" value={totalProxies} />
+            <Statistic title="连接 / 映射" value={totalConns} suffix={`/ ${totalProxies} 映射`} />
           </Card>
         </Col>
         <Col xs={12} md={6}>
@@ -75,8 +76,8 @@ export default function Dashboard() {
           <Card title="FRPS 节点运行环境" size="small" style={{ marginBottom: 16 }}>
             <Table rowKey="uuid" size="small" pagination={false} loading={topo.isLoading} dataSource={nodes} columns={frpsColumns} />
           </Card>
-          <Card title="FRPC 客户端运行环境" size="small">
-            <Table rowKey="uuid" size="small" pagination={false} loading={topo.isLoading} dataSource={clients} columns={frpcColumns} />
+          <Card title="FRPC 主机运行环境" size="small">
+            <Table rowKey="uuid" size="small" pagination={false} loading={topo.isLoading} dataSource={hosts} columns={hostColumns} />
           </Card>
         </Col>
         <Col xs={24} lg={8}>

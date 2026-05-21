@@ -70,11 +70,11 @@ func (s *Service) ListProxies(frpcUUID string) ([]model.ProxyMapping, error) {
 	return rows, nil
 }
 
-func (s *Service) AddProxy(frpcUUID string, in ProxyMappingInput) (*model.ProxyMapping, error) {
+func (s *Service) AddProxy(connUUID string, in ProxyMappingInput) (*model.ProxyMapping, error) {
 	var row model.ProxyMapping
 	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
-		var c model.FRPCClient
-		if err := tx.Where("uuid = ?", frpcUUID).First(&c).Error; err != nil {
+		var c model.FRPCConnection
+		if err := tx.Where("uuid = ?", connUUID).First(&c).Error; err != nil {
 			if isNotFound(err) {
 				return ErrNotFound
 			}
@@ -91,7 +91,7 @@ func (s *Service) AddProxy(frpcUUID string, in ProxyMappingInput) (*model.ProxyM
 		if err := validateProxy(in, used); err != nil {
 			return err
 		}
-		row = in.toModel(frpcUUID)
+		row = in.toModel(connUUID)
 		// Host-occupancy check: a remote_port held by a non-service-edge process
 		// on the frps host cannot bind, so the mapping is created inactive.
 		setHostOccupancy(&row, externalPorts(node, used))
@@ -100,13 +100,13 @@ func (s *Service) AddProxy(frpcUUID string, in ProxyMappingInput) (*model.ProxyM
 	if err != nil {
 		return nil, err
 	}
-	s.bumpFRPC(frpcUUID)
+	s.bumpConnection(connUUID)
 	return &row, nil
 }
 
 func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMapping, error) {
 	var row model.ProxyMapping
-	var frpcUUID string
+	var connUUID string
 	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&row, id).Error; err != nil {
 			if isNotFound(err) {
@@ -114,9 +114,9 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 			}
 			return err
 		}
-		frpcUUID = row.FRPCUUID
-		var c model.FRPCClient
-		if err := tx.Where("uuid = ?", frpcUUID).First(&c).Error; err != nil {
+		connUUID = row.FRPCUUID
+		var c model.FRPCConnection
+		if err := tx.Where("uuid = ?", connUUID).First(&c).Error; err != nil {
 			return err
 		}
 		var node model.FRPSNode
@@ -140,7 +140,7 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 		if row.RemotePort != nil {
 			delete(external, *row.RemotePort)
 		}
-		updated := in.toModel(frpcUUID)
+		updated := in.toModel(connUUID)
 		updated.ID = row.ID
 		updated.CreatedAt = row.CreatedAt
 		setHostOccupancy(&updated, external)
@@ -150,7 +150,7 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 	if err != nil {
 		return nil, err
 	}
-	s.bumpFRPC(frpcUUID)
+	s.bumpConnection(connUUID)
 	return &row, nil
 }
 
@@ -165,7 +165,7 @@ func (s *Service) DeleteProxy(id uint) error {
 	if err := s.Store.DB.Delete(&model.ProxyMapping{}, id).Error; err != nil {
 		return err
 	}
-	s.bumpFRPC(row.FRPCUUID)
+	s.bumpConnection(row.FRPCUUID)
 	return nil
 }
 
@@ -202,17 +202,19 @@ func setHostOccupancy(row *model.ProxyMapping, external map[int]bool) {
 	}
 }
 
-// usedPortsTx computes the occupied remote ports within an existing tx.
+// usedPortsTx computes the occupied remote ports within an existing tx: the
+// node's reserved ports plus every proxy remote_port across all connections
+// targeting this frps (connections may belong to many different hosts).
 func usedPortsTx(tx *gorm.DB, frpsUUID string, node model.FRPSNode) (map[int]bool, error) {
 	used := nodeReservedPorts(node)
-	var clientUUIDs []string
-	if err := tx.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &clientUUIDs).Error; err != nil {
+	var connUUIDs []string
+	if err := tx.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &connUUIDs).Error; err != nil {
 		return nil, err
 	}
-	if len(clientUUIDs) > 0 {
+	if len(connUUIDs) > 0 {
 		var ports []int
 		if err := tx.Model(&model.ProxyMapping{}).
-			Where("frpc_uuid IN ? AND remote_port IS NOT NULL", clientUUIDs).
+			Where("frpc_uuid IN ? AND remote_port IS NOT NULL", connUUIDs).
 			Pluck("remote_port", &ports).Error; err != nil {
 			return nil, err
 		}

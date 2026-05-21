@@ -184,11 +184,11 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 func (s *Service) DeleteFRPS(uuid string) error {
 	return s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		var count int64
-		if err := tx.Model(&model.FRPCClient{}).Where("frps_uuid = ?", uuid).Count(&count).Error; err != nil {
+		if err := tx.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", uuid).Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
-			return fmt.Errorf("%w: %d frpc client(s) still reference this node", ErrConflict, count)
+			return fmt.Errorf("%w: 仍有 %d 个 frpc 连接指向该节点", ErrConflict, count)
 		}
 		res := tx.Where("uuid = ?", uuid).Delete(&model.FRPSNode{})
 		if res.Error != nil {
@@ -210,14 +210,14 @@ func (s *Service) UsedRemotePorts(frpsUUID string) (map[int]bool, error) {
 	}
 	used := nodeReservedPorts(*node)
 
-	var clientUUIDs []string
-	if err := s.Store.DB.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &clientUUIDs).Error; err != nil {
+	var connUUIDs []string
+	if err := s.Store.DB.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &connUUIDs).Error; err != nil {
 		return nil, err
 	}
-	if len(clientUUIDs) > 0 {
+	if len(connUUIDs) > 0 {
 		var ports []int
 		if err := s.Store.DB.Model(&model.ProxyMapping{}).
-			Where("frpc_uuid IN ? AND remote_port IS NOT NULL", clientUUIDs).
+			Where("frpc_uuid IN ? AND remote_port IS NOT NULL", connUUIDs).
 			Pluck("remote_port", &ports).Error; err != nil {
 			return nil, err
 		}
@@ -249,19 +249,21 @@ func (s *Service) HostOccupiedPorts(frpsUUID string) ([]int, error) {
 	return out, nil
 }
 
-// bumpClientsOf increments config_version for all frpc clients of an frps and
-// wakes their long-polls.
+// bumpClientsOf re-renders every frpc connection targeting an frps: it bumps each
+// connection's config_version and then bumps each owning host's aggregate version
+// (which wakes that host's long-poll).
 func (s *Service) bumpClientsOf(frpsUUID string) {
-	var uuids []string
-	if err := s.Store.DB.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).Pluck("uuid", &uuids).Error; err != nil {
+	var conns []model.FRPCConnection
+	if err := s.Store.DB.Where("frps_uuid = ?", frpsUUID).Find(&conns).Error; err != nil || len(conns) == 0 {
 		return
 	}
-	if len(uuids) == 0 {
-		return
+	hosts := map[string]bool{}
+	for _, c := range conns {
+		s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ?", c.UUID).
+			UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()})
+		hosts[c.HostUUID] = true
 	}
-	s.Store.DB.Model(&model.FRPCClient{}).Where("frps_uuid = ?", frpsUUID).
-		UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()})
-	for _, u := range uuids {
-		s.Notifier.Publish(u)
+	for h := range hosts {
+		s.bumpHost(h)
 	}
 }

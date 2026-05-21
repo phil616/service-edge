@@ -39,11 +39,11 @@ func (s *Service) RenderInstallScript(targetType, token string) (string, error) 
 		}
 		frpVersion = node.FrpVersion
 	case "frpc":
-		var c, err = s.GetFRPC(tok.TargetUUID)
+		host, err := s.GetFRPCHost(tok.TargetUUID)
 		if err != nil {
 			return "", err
 		}
-		frpVersion = c.FrpVersion
+		frpVersion = host.FrpVersion
 	default:
 		return "", fmt.Errorf("unknown target type %q", targetType)
 	}
