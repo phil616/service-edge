@@ -175,13 +175,29 @@ func normalizeFrpVersion(version string) string {
 	return version
 }
 
-// frpBinary builds the release download descriptor for a version/os/arch.
+// frpBinary builds the release download descriptor for a version/os/arch. If a
+// matching release tarball has been uploaded to the control plane, the agent is
+// pointed at the local dist endpoint instead of GitHub — so binary installs
+// triggered after enrollment (version change, missing binary) also work when the
+// host can't reach GitHub. Falls back to the configured GitHub base otherwise.
 func (s *Service) frpBinary(version, osName, arch string) protocol.FrpBinary {
 	tag := normalizeFrpVersion(version) // always v-prefixed for the URL path
 	v := strings.TrimPrefix(tag, "v")
 	file := fmt.Sprintf("frp_%s_%s_%s.tar.gz", v, osName, arch)
+	if s.hasFRPDist(file) {
+		url := strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/frp-dist/" + file
+		return protocol.FrpBinary{Version: version, DownloadURL: url}
+	}
 	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), tag, file)
 	return protocol.FrpBinary{Version: version, DownloadURL: url}
+}
+
+// hasFRPDist reports whether a release tarball with the exact filename has been
+// uploaded (and is therefore served by the local /frp-dist endpoint).
+func (s *Service) hasFRPDist(filename string) bool {
+	var count int64
+	s.Store.DB.Model(&model.FRPDistFile{}).Where("filename = ?", filename).Count(&count)
+	return count > 0
 }
 
 // NoteFRPSPublicIP auto-fills an frps node's public IP from the source address

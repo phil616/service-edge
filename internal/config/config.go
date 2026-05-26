@@ -34,6 +34,7 @@ type Config struct {
 
 	InstallScriptBase string `yaml:"install_script_base"`
 	AgentDownloadBase string `yaml:"agent_download_base"`
+	FRPDistDir        string `yaml:"frp_dist_dir"`
 
 	EnrollmentTokenTTL Duration `yaml:"enrollment_token_ttl"`
 
@@ -96,6 +97,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.FrpRelease.DefaultVersion == "" {
 		c.FrpRelease.DefaultVersion = "v0.61.1"
+	}
+	if c.FRPDistDir == "" {
+		c.FRPDistDir = "frp-dist"
 	}
 	if c.EnrollmentTokenTTL == 0 {
 		c.EnrollmentTokenTTL = Duration(15 * time.Minute)

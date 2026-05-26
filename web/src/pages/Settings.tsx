@@ -1,8 +1,22 @@
-import { useEffect } from 'react'
-import { Button, Card, Descriptions, Form, Input, Space, Typography, message } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import {
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Input,
+  Popconfirm,
+  Space,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from 'antd'
+import { DeleteOutlined, InboxOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchMe, getCAInfo, getSettings, updateSettings } from '../api/client'
+import { fetchMe, getCAInfo, getSettings, updateSettings, listFRPDists, uploadFRPDist, deleteFRPDist } from '../api/client'
 import CertDescriptions from '../components/CertDescriptions'
+import type { FRPDistFile } from '../api/types'
 
 // GitHub Release 作为 Agent 下载源：安装脚本会在基址后追加 _linux_<arch>，
 // 恰好对应 Release 产物 agent_linux_amd64 / agent_linux_arm64。
@@ -24,6 +38,143 @@ function ReleaseHint({ onFill }: { onFill: () => void }) {
         填入此地址
       </Button>
     </span>
+  )
+}
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+
+function FRPDistCard() {
+  const qc = useQueryClient()
+  const [uploading, setUploading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const { data: dists = [], isLoading } = useQuery({
+    queryKey: ['frp-dists'],
+    queryFn: listFRPDists,
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: deleteFRPDist,
+    onSuccess: () => {
+      message.success('已删除')
+      qc.invalidateQueries({ queryKey: ['frp-dists'] })
+    },
+  })
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.name.endsWith('.tar.gz')) {
+      message.error('仅支持 .tar.gz 格式的 frp release 产物')
+      e.target.value = ''
+      return
+    }
+    setUploading(true)
+    try {
+      await uploadFRPDist(file)
+      message.success(`已上传 ${file.name}`)
+      qc.invalidateQueries({ queryKey: ['frp-dists'] })
+    } catch {
+      // error already shown by axios interceptor
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const columns = [
+    {
+      title: '文件名',
+      dataIndex: 'filename',
+      key: 'filename',
+      render: (v: string) => <Typography.Text code style={{ fontSize: 12 }}>{v}</Typography.Text>,
+    },
+    {
+      title: '版本',
+      dataIndex: 'version',
+      key: 'version',
+      render: (v: string) => <Tag color="blue">v{v}</Tag>,
+      width: 100,
+    },
+    {
+      title: '平台',
+      key: 'platform',
+      render: (_: unknown, r: FRPDistFile) => <Tag>{r.os}/{r.arch}</Tag>,
+      width: 120,
+    },
+    {
+      title: '大小',
+      dataIndex: 'size',
+      key: 'size',
+      render: (v: number) => formatBytes(v),
+      width: 100,
+    },
+    {
+      title: '上传时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (v: string) => new Date(v).toLocaleString(),
+      width: 180,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_: unknown, r: FRPDistFile) => (
+        <Popconfirm
+          title="确认删除此发行版？"
+          onConfirm={() => deleteMut.mutate(r.id)}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Button danger size="small" icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
+    },
+  ]
+
+  return (
+    <Card
+      title="FRP 发行版管理"
+      extra={
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".tar.gz"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <Button
+            type="primary"
+            loading={uploading}
+            icon={<InboxOutlined />}
+            onClick={() => inputRef.current?.click()}
+          >
+            上传发行版
+          </Button>
+        </>
+      }
+    >
+      <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+        上传 GitHub 官方 frp release 产物（<Typography.Text code>frp_{'<version>'}_{'{'}os{'}'}_{'{'}arch{'}'}.tar.gz</Typography.Text>），
+        安装脚本会优先从此处下载，无法访问时自动回退到 GitHub。可同时存储多个版本，支持 amd64 / arm64 等多架构。
+      </Typography.Paragraph>
+      <Table<FRPDistFile>
+        dataSource={dists}
+        columns={columns}
+        rowKey="id"
+        loading={isLoading}
+        size="small"
+        pagination={false}
+        locale={{ emptyText: '暂无上传的 frp 发行版' }}
+      />
+    </Card>
   )
 }
 
@@ -92,6 +243,8 @@ export default function Settings() {
           </Button>
         </Form>
       </Card>
+
+      <FRPDistCard />
 
       <Card title="CA 证书详情">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>

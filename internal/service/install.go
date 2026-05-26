@@ -17,6 +17,7 @@ type installScriptData struct {
 	AgentDownloadURL string
 	FrpVersion       string
 	FrpBaseURL       string
+	FRPDistBaseURL   string // local dist endpoint; script tries this first, falls back to FrpBaseURL
 }
 
 // RenderInstallScript renders the install script for the given enrollment token.
@@ -56,6 +57,7 @@ func (s *Service) RenderInstallScript(targetType, token string) (string, error) 
 		AgentDownloadURL: s.AgentDownloadURL(targetType),
 		FrpVersion:       frpVersion,
 		FrpBaseURL:       strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"),
+		FRPDistBaseURL:   strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/frp-dist",
 	}
 
 	raw := scripts.FRPSInstall

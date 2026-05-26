@@ -67,22 +67,6 @@ func (h *Handler) DeleteFRPS(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (h *Handler) FRPSStatus(c *gin.Context) {
-	node, err := h.Svc.GetFRPS(c.Param("uuid"))
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"uuid":           node.UUID,
-		"status":         node.Status,
-		"last_heartbeat": node.LastHeartbeat,
-		"config_version": node.ConfigVersion,
-		"frp_version":    node.FrpVersion,
-		"public_ip":      node.PublicIP,
-	})
-}
-
 func (h *Handler) AvailablePorts(c *gin.Context) {
 	uuid := c.Param("uuid")
 	used, err := h.Svc.UsedRemotePorts(uuid)

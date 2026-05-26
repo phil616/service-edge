@@ -155,3 +155,13 @@ export interface ProxyInput {
   custom_domains?: string[]
   subdomain?: string
 }
+
+export interface FRPDistFile {
+  id: number
+  filename: string
+  version: string
+  os: string
+  arch: string
+  size: number
+  created_at: string
+}

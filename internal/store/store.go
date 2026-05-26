@@ -37,6 +37,17 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
+	// SQLite allows only one writer at a time. Serializing all access through a
+	// single connection (combined with WAL for read snapshots) removes the
+	// SQLITE_BUSY errors that a multi-connection pool produces under concurrent
+	// writes from many agents (heartbeats + status + acks) plus UI traffic. All
+	// queries here are sub-millisecond, so the throughput cost is negligible.
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("get sql db: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+
 	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}

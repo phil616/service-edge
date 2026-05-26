@@ -63,11 +63,12 @@ func main() {
 	h := handler.New(svc, jwt)
 
 	r := api.NewRouter(api.Options{
-		Handler:   h,
-		JWT:       jwt,
-		Cfg:       cfg,
-		StaticFS:  web.FS(),
-		AgentDist: *agentDist,
+		Handler:    h,
+		JWT:        jwt,
+		Cfg:        cfg,
+		StaticFS:   web.FS(),
+		AgentDist:  *agentDist,
+		FRPDistDir: cfg.FRPDistDir,
 	})
 
 	srv := &http.Server{

@@ -151,6 +151,19 @@ type Setting struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+// FRPDistFile tracks an uploaded frp release tarball (e.g. frp_0.61.1_linux_amd64.tar.gz).
+// The file is stored on disk under FRPDistDir; the download endpoint serves it publicly
+// so agents can fetch it without hitting GitHub.
+type FRPDistFile struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	Filename  string    `gorm:"column:filename;uniqueIndex;not null" json:"filename"`
+	Version   string    `gorm:"column:version;not null;index" json:"version"`
+	OS        string    `gorm:"column:os;not null" json:"os"`
+	Arch      string    `gorm:"column:arch;not null" json:"arch"`
+	Size      int64     `gorm:"column:size" json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // AllModels returns every model for auto-migration.
 func AllModels() []any {
 	return []any{
@@ -162,5 +175,6 @@ func AllModels() []any {
 		&EnrollmentToken{},
 		&AuditLog{},
 		&Setting{},
+		&FRPDistFile{},
 	}
 }

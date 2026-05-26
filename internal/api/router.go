@@ -17,8 +17,9 @@ type Options struct {
 	Handler    *handler.Handler
 	JWT        *middleware.JWTManager
 	Cfg        *config.Config
-	StaticFS   fs.FS // built frontend (may be nil)
+	StaticFS   fs.FS  // built frontend (may be nil)
 	AgentDist  string // dir holding agent binaries served under /download (may be "")
+	FRPDistDir string // dir holding uploaded frp release tarballs served under /frp-dist
 }
 
 // NewRouter builds the gin engine with all routes wired.
@@ -39,6 +40,11 @@ func NewRouter(o Options) *gin.Engine {
 		r.Static("/download", o.AgentDist)
 	}
 
+	// FRP release tarball downloads (public; agents fetch during install).
+	if o.FRPDistDir != "" {
+		r.Static("/frp-dist", o.FRPDistDir)
+	}
+
 	api := r.Group("/api/v1")
 
 	// Auth (login public; rest protected).
@@ -55,7 +61,6 @@ func NewRouter(o Options) *gin.Engine {
 		authed.PUT("/frps/:uuid", o.Handler.UpdateFRPS)
 		authed.DELETE("/frps/:uuid", o.Handler.DeleteFRPS)
 		authed.POST("/frps/:uuid/install-command", o.Handler.InstallCommandFRPS)
-		authed.GET("/frps/:uuid/status", o.Handler.FRPSStatus)
 		authed.GET("/frps/:uuid/available-ports", o.Handler.AvailablePorts)
 		authed.GET("/frps/:uuid/port-usage", o.Handler.PortUsage)
 
@@ -84,6 +89,10 @@ func NewRouter(o Options) *gin.Engine {
 
 		authed.GET("/settings", o.Handler.GetSettings)
 		authed.PUT("/settings", o.Handler.UpdateSettings)
+
+		authed.GET("/frp-dist", o.Handler.ListFRPDists)
+		authed.POST("/frp-dist", o.Handler.UploadFRPDist)
+		authed.DELETE("/frp-dist/:id", o.Handler.DeleteFRPDist)
 
 		authed.GET("/audit-logs", o.Handler.ListAuditLogs)
 	}

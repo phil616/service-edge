@@ -9,6 +9,7 @@ ENROLLMENT_TOKEN="{{ .EnrollmentToken }}"
 AGENT_DOWNLOAD_URL="{{ .AgentDownloadURL }}"
 FRP_VERSION="{{ .FrpVersion }}"
 FRP_BASE_URL="{{ .FrpBaseURL }}"
+FRP_LOCAL_DIST_URL="{{ .FRPDistBaseURL }}"
 # ------------------------------------
 
 INSTALL_DIR="/opt/service-edge/frpc-agent"
@@ -35,9 +36,24 @@ if [ ! -f "$FRPC_BINARY" ]; then
   FRP_TARBALL="frp_${FRP_VERSION#v}_linux_${FRP_ARCH}.tar.gz"
   FRP_TAG="${FRP_VERSION}"
   [[ "$FRP_TAG" != v* ]] && FRP_TAG="v${FRP_TAG}"
-  FRP_URL="${FRP_BASE_URL}/${FRP_TAG}/${FRP_TARBALL}"
-  echo "Downloading frpc: $FRP_URL"
-  curl -fSL "$FRP_URL" -o /tmp/frp.tar.gz
+  FRP_GITHUB_URL="${FRP_BASE_URL}/${FRP_TAG}/${FRP_TARBALL}"
+
+  _frp_downloaded=0
+  if [ -n "$FRP_LOCAL_DIST_URL" ]; then
+    _local_url="${FRP_LOCAL_DIST_URL}/${FRP_TARBALL}"
+    echo "Trying local frp dist: $_local_url"
+    if curl -fSL "$_local_url" -o /tmp/frp.tar.gz 2>/dev/null; then
+      echo "Downloaded frpc from local dist"
+      _frp_downloaded=1
+    else
+      echo "Local dist unavailable, falling back to GitHub"
+    fi
+  fi
+  if [ "$_frp_downloaded" -eq 0 ]; then
+    echo "Downloading frpc from GitHub: $FRP_GITHUB_URL"
+    curl -fSL "$FRP_GITHUB_URL" -o /tmp/frp.tar.gz
+  fi
+
   tar -xzf /tmp/frp.tar.gz -C /tmp/
   cp /tmp/frp_*/frpc "$FRPC_BINARY"
   chmod +x "$FRPC_BINARY"

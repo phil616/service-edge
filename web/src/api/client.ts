@@ -7,6 +7,7 @@ import type {
   CertInfo,
   FRPCConnection,
   FRPCHost,
+  FRPDistFile,
   FRPSNode,
   InstallCommandResponse,
   PortAvailability,
@@ -172,6 +173,23 @@ export async function getSettings() {
 export async function updateSettings(body: { agent_download_url_frps: string; agent_download_url_frpc: string }) {
   const { data } = await http.put<AgentDownloadSettings>('/api/v1/settings', body)
   return data
+}
+
+// ---- frp dist ----
+export async function listFRPDists() {
+  const { data } = await http.get<{ items: FRPDistFile[] }>('/api/v1/frp-dist')
+  return data.items ?? []
+}
+export async function uploadFRPDist(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await http.post<{ items: FRPDistFile[] }>('/api/v1/frp-dist', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data.items ?? []
+}
+export async function deleteFRPDist(id: number) {
+  await http.delete(`/api/v1/frp-dist/${id}`)
 }
 
 // ---- audit ----
