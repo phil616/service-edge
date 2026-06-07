@@ -26,10 +26,6 @@ func (s Systemd) Start(unit string) error  { _, err := s.run("start", unit); ret
 func (s Systemd) Stop(unit string) error   { _, err := s.run("stop", unit); return err }
 func (s Systemd) Restart(unit string) error { _, err := s.run("restart", unit); return err }
 
-// Reload sends SIGHUP via systemd (ExecReload). frp v0.50+ honors SIGHUP for
-// hot reload of proxies; transport/TLS changes still need a restart.
-func (s Systemd) Reload(unit string) error { _, err := s.run("reload", unit); return err }
-
 // IsActive reports whether the unit is currently active (running).
 func (s Systemd) IsActive(unit string) bool {
 	out, _ := s.run("is-active", unit)

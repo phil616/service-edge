@@ -268,6 +268,11 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 	if agentType == "frpc" {
 		s.recordConnectionStatuses(uuid, now, req)
 	}
+	// An frps report refreshes the host's bound ports — heal any mappings that were
+	// stuck inactive while their remote_port was occupied but is now free.
+	if agentType == "frps" && req.ListeningPorts != nil {
+		s.ReevaluateOccupancy(uuid, req.ListeningPorts)
+	}
 	return nil
 }
 

@@ -20,8 +20,10 @@ func frpcUnit(connUUID string) string {
 
 // reconcile brings the host's running frpc processes in line with the desired set
 // of connections from the control plane: it (re)applies new/changed connections,
-// stops connections that were removed, and reports the result.
-func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigResponse) {
+// stops connections that were removed, and reports the result. It returns true
+// only when every connection applied cleanly; the caller backs off and retries on
+// false.
+func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigResponse) bool {
 	slog.Info("host config received", "version", bundle.ConfigVersion, "connections", len(bundle.Connections))
 
 	// The frpc binary is shared by all connections on the host; install once.
@@ -29,7 +31,7 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		if err := frp.EnsureBinary(r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256); err != nil {
 			slog.Error("frpc binary install failed", "err", err)
 			r.ack(ctx, bundle.ConfigVersion, false, "binary install: "+err.Error())
-			return
+			return false
 		}
 	}
 
@@ -59,11 +61,19 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		slog.Info("connection removed", "conn", uuid)
 	}
 
-	if err := r.state.SaveHost(bundle.ConfigVersion); err != nil {
-		slog.Warn("failed to persist host state", "err", err)
+	ok := len(errs) == 0
+	// Only advance the host's aggregate version when every connection applied. On
+	// partial failure we keep the old version so the next long-poll re-delivers the
+	// bundle and the failed connections are retried (succeeded ones are skipped via
+	// their per-connection version); the caller backs off between attempts.
+	if ok {
+		if err := r.state.SaveHost(bundle.ConfigVersion); err != nil {
+			slog.Warn("failed to persist host state", "err", err)
+		}
 	}
-	r.ack(ctx, bundle.ConfigVersion, len(errs) == 0, strings.Join(errs, "; "))
+	r.ack(ctx, bundle.ConfigVersion, ok, strings.Join(errs, "; "))
 	r.scheduleStatusReport(ctx)
+	return ok
 }
 
 // applyConnection writes one connection's config/certs and (re)starts its frpc

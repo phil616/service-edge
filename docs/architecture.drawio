@@ -1,0 +1,93 @@
+<mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="720" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+
+    <!-- Background zones (drawn first = behind) -->
+    <mxCell id="zoneCP" value="控制面 Control Plane  (Go + Gin + GORM + SQLite + go:embed React)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f6ff;strokeColor=#6c8ebf;dashed=1;verticalAlign=top;fontStyle=1;fontSize=13;align=center;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="40" y="150" width="900" height="220" as="geometry" />
+    </mxCell>
+    <mxCell id="zoneFRPS" value="公网出口节点 (frps host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbf3ff;strokeColor=#9673a6;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;align=center;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="40" y="440" width="420" height="220" as="geometry" />
+    </mxCell>
+    <mxCell id="zoneFRPC" value="内网节点 (frpc host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbf3ff;strokeColor=#9673a6;dashed=1;verticalAlign=top;fontStyle=1;fontSize=12;align=center;spacingTop=6;" vertex="1" parent="1">
+      <mxGeometry x="560" y="440" width="420" height="220" as="geometry" />
+    </mxCell>
+
+    <!-- Admin browser -->
+    <mxCell id="browser" value="管理员浏览器&#10;Web 控制台 (SPA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+      <mxGeometry x="390" y="40" width="200" height="60" as="geometry" />
+    </mxCell>
+
+    <!-- Control plane modules -->
+    <mxCell id="webfe" value="Web 前端&#10;React18 / Vite / AntD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="70" y="200" width="170" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="userapi" value="用户 API&#10;(JWT / CORS 白名单)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="265" y="200" width="170" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="agentapi" value="Agent API&#10;(X-Agent-Token / long-poll)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="460" y="200" width="190" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="pki" value="PKI / CA&#10;短期证书签发(≤90d)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="675" y="200" width="160" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="service" value="Service 业务逻辑&#10;frps/frpc/proxy/渲染" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="265" y="290" width="190" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="store" value="Store&#10;SQLite + 审计日志" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="490" y="290" width="160" height="55" as="geometry" />
+    </mxCell>
+
+    <!-- FRPS host -->
+    <mxCell id="frpsAgent" value="FRPS Agent&#10;long-poll / 回滚 / watchdog" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="70" y="480" width="170" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="frpsProc" value="frps 进程&#10;(公网入口)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="270" y="480" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="extuser" value="公网用户" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="270" y="590" width="150" height="45" as="geometry" />
+    </mxCell>
+
+    <!-- FRPC host -->
+    <mxCell id="frpcAgent" value="FRPC Agent&#10;long-poll / 回滚 / watchdog" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="790" y="480" width="170" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="frpcProc" value="frpc 进程" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="600" y="480" width="150" height="55" as="geometry" />
+    </mxCell>
+    <mxCell id="intranetSvc" value="内网服务&#10;(被穿透目标)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+      <mxGeometry x="600" y="590" width="150" height="45" as="geometry" />
+    </mxCell>
+
+    <!-- Edges -->
+    <mxCell id="e1" value="HTTPS / Bearer JWT" style="endArrow=classic;html=1;fontSize=10;" edge="1" parent="1" source="browser" target="userapi">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2" value="HTTPS + Token&#10;long-polling 配置下发" style="endArrow=classic;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="frpsAgent" target="agentapi">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3" value="HTTPS + Token&#10;long-polling 配置下发" style="endArrow=classic;html=1;fontSize=10;dashed=1;" edge="1" parent="1" source="frpcAgent" target="agentapi">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e4" value="签发证书" style="endArrow=classic;html=1;fontSize=10;strokeColor=#d79b00;dashed=1;" edge="1" parent="1" source="pki" target="frpsAgent">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e5" value="签发证书" style="endArrow=classic;html=1;fontSize=10;strokeColor=#d79b00;dashed=1;" edge="1" parent="1" source="pki" target="frpcAgent">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e6" value="frp 隧道 (mTLS)" style="endArrow=classic;startArrow=classic;html=1;fontSize=11;fontStyle=1;strokeColor=#9673a6;strokeWidth=2;" edge="1" parent="1" source="frpcProc" target="frpsProc">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e7" value="访问" style="endArrow=classic;html=1;fontSize=10;" edge="1" parent="1" source="extuser" target="frpsProc">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e8" value="转发" style="endArrow=classic;html=1;fontSize=10;" edge="1" parent="1" source="frpcProc" target="intranetSvc">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e9" value="嵌入 go:embed" style="endArrow=none;html=1;fontSize=10;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="browser" target="webfe">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+  </root>
+</mxGraphModel>

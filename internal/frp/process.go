@@ -29,16 +29,20 @@ func FrpVersion(binaryPath string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Reload attempts a hot reload (SIGHUP) first, falling back to a full restart.
-// Returns whether a restart was used and any error.
+// ReloadOrRestart applies a staged config change to the running frp process by
+// fully restarting it.
+//
+// We deliberately do NOT use SIGHUP "hot reload": frp does not hot-reload proxies
+// on SIGHUP (its only hot-reload path is the admin API, and even that skips
+// transport/TLS changes), while `systemctl reload` -> `kill -HUP` always reports
+// success regardless of whether frp did anything. That combination silently
+// accepted every config change at the control plane while the data plane kept the
+// old proxy set — e.g. a deleted remote_port stayed bound. A restart is cheap
+// (~1-2s) and is the only reliable way to make frp adopt added/removed proxies.
+//
+// Returns restarted=true (kept for caller logging).
 func (s Systemd) ReloadOrRestart(unit string) (restarted bool, err error) {
-	if rerr := s.Reload(unit); rerr == nil {
-		return false, nil
-	}
-	if rerr := s.Restart(unit); rerr != nil {
-		return true, rerr
-	}
-	return true, nil
+	return true, s.Restart(unit)
 }
 
 // WaitActive polls is-active for up to timeout, returning true once active.

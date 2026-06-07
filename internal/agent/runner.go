@@ -149,11 +149,19 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 				backoff = nextBackoff(backoff)
 				continue
 			}
-			backoff = time.Second
 			if notModified {
+				backoff = time.Second
 				continue
 			}
-			r.reconcile(ctx, bundle)
+			if !r.reconcile(ctx, bundle) {
+				// Apply incomplete: the host version was not advanced, so the next
+				// poll re-delivers the bundle. Back off so we don't churn-restart frp.
+				slog.Warn("host config apply incomplete, backing off", "backoff", backoff)
+				sleepCtx(ctx, backoff)
+				backoff = nextBackoff(backoff)
+				continue
+			}
+			backoff = time.Second
 			continue
 		}
 
@@ -167,15 +175,24 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 			backoff = nextBackoff(backoff)
 			continue
 		}
-		backoff = time.Second
 		if notModified {
+			backoff = time.Second
 			continue
 		}
-		r.applyBundle(ctx, bundle)
+		if !r.applyBundle(ctx, bundle) {
+			slog.Warn("config apply failed, backing off", "backoff", backoff)
+			sleepCtx(ctx, backoff)
+			backoff = nextBackoff(backoff)
+			continue
+		}
+		backoff = time.Second
 	}
 }
 
-func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigResponse) {
+// applyBundle stages and applies one frps config bundle. It returns true on a
+// clean apply; on failure it leaves the applied version untouched so the caller
+// re-polls (the same bundle is re-delivered) and retries with backoff.
+func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigResponse) bool {
 	slog.Info("new config received", "version", bundle.ConfigVersion)
 
 	// Ensure the right frp binary is installed before applying.
@@ -183,14 +200,14 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 		if err := frp.EnsureBinary(r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256); err != nil {
 			slog.Error("frp binary install failed", "err", err)
 			r.ack(ctx, bundle.ConfigVersion, false, "binary install: "+err.Error())
-			return
+			return false
 		}
 	}
 
 	if err := r.applier.Apply(bundle); err != nil {
 		slog.Error("config apply failed, keeping previous config", "err", err)
 		r.ack(ctx, bundle.ConfigVersion, false, err.Error())
-		return
+		return false
 	}
 
 	if err := r.state.Save(bundle.ConfigVersion, bundle.FrpBinary.Version); err != nil {
@@ -200,6 +217,7 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 	slog.Info("config applied", "version", bundle.ConfigVersion)
 
 	r.scheduleStatusReport(ctx)
+	return true
 }
 
 // scheduleStatusReport reports status shortly after a config apply so the control

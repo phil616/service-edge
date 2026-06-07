@@ -169,6 +169,53 @@ func (s *Service) DeleteProxy(id uint) error {
 	return nil
 }
 
+// ReevaluateOccupancy reactivates tcp/udp mappings on the given frps whose
+// remote_port is no longer bound on the frps host. It runs after an frps status
+// report refreshes the host's listening ports.
+//
+// setHostOccupancy only runs at create/update time against a possibly-stale port
+// snapshot, so a mapping marked inactive while its port was held — by a foreign
+// process, or by a just-deleted proxy the data plane hadn't torn down yet — would
+// otherwise stay unrendered forever once the port frees. To stay flap-free this
+// only ever CLEARS inactive: a mapping is healed only when its port is absent from
+// the host's live listen set (so nothing holds it). Deactivation remains a
+// create/update-time decision.
+func (s *Service) ReevaluateOccupancy(frpsUUID string, listenPorts []int) {
+	bound := make(map[int]bool, len(listenPorts))
+	for _, p := range listenPorts {
+		bound[p] = true
+	}
+	var connUUIDs []string
+	if err := s.Store.DB.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", frpsUUID).
+		Pluck("uuid", &connUUIDs).Error; err != nil || len(connUUIDs) == 0 {
+		return
+	}
+	var rows []model.ProxyMapping
+	if err := s.Store.DB.
+		Where("frpc_uuid IN ? AND inactive = ? AND remote_port IS NOT NULL", connUUIDs, true).
+		Find(&rows).Error; err != nil {
+		return
+	}
+	reactivated := map[string]bool{}
+	for _, row := range rows {
+		if row.ProxyType != "tcp" && row.ProxyType != "udp" {
+			continue
+		}
+		if row.RemotePort == nil || bound[*row.RemotePort] {
+			continue // port still held by something — leave inactive
+		}
+		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("id = ?", row.ID).
+			UpdateColumns(map[string]any{"inactive": false, "inactive_reason": ""}).Error; err != nil {
+			continue
+		}
+		reactivated[row.FRPCUUID] = true
+	}
+	// Bump each affected connection so the now-active mapping is rendered & delivered.
+	for connUUID := range reactivated {
+		s.bumpConnection(connUUID)
+	}
+}
+
 // parseListenPorts decodes the JSON port array an agent reported for its host.
 func parseListenPorts(raw string) []int {
 	if raw == "" {
