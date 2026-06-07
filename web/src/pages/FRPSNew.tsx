@@ -1,7 +1,9 @@
+import { useEffect, useMemo } from 'react'
 import { Button, Card, Divider, Form, Input, InputNumber, Switch, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createFRPS } from '../api/client'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createFRPS, listFRPDists } from '../api/client'
+import { latestFrpVersion } from '../lib/frp'
 import DNSResolver from '../components/DNSResolver'
 
 export default function FRPSNew() {
@@ -11,6 +13,13 @@ export default function FRPSNew() {
   const dashboardEnabled = Form.useWatch('dashboard_enabled', form)
   const kcpEnabled = Form.useWatch('kcp_enabled', form)
   const quicEnabled = Form.useWatch('quic_enabled', form)
+
+  // Default the frp version to the latest release present in dist management.
+  const { data: dists } = useQuery({ queryKey: ['frp-dists'], queryFn: listFRPDists })
+  const latest = useMemo(() => latestFrpVersion(dists ?? []), [dists])
+  useEffect(() => {
+    if (latest && !form.getFieldValue('frp_version')) form.setFieldValue('frp_version', latest)
+  }, [latest, form])
 
   const create = useMutation({
     mutationFn: createFRPS,
@@ -43,7 +52,7 @@ export default function FRPSNew() {
         form={form}
         layout="vertical"
         style={{ maxWidth: 560 }}
-        initialValues={{ bind_port: 7000, frp_version: 'v0.61.1', dashboard_enabled: false }}
+        initialValues={{ bind_port: 7000, dashboard_enabled: false }}
         onFinish={onFinish}
       >
         <Form.Item name="name" label="边缘节点名称" rules={[{ required: true }]}>
@@ -56,8 +65,8 @@ export default function FRPSNew() {
           <Input placeholder="例如 203.0.113.10" />
         </Form.Item>
         <DNSResolver onResolved={(ip) => form.setFieldValue('public_ip', ip)} />
-        <Form.Item name="frp_version" label="FRP 版本">
-          <Input placeholder="v0.61.1" />
+        <Form.Item name="frp_version" label="FRP 版本" extra={latest ? `默认使用发行版管理中的最新版本 ${latest}` : '发行版管理中暂无可用版本，将使用内置默认版本'}>
+          <Input placeholder={latest || 'v0.61.1'} />
         </Form.Item>
 
         <Divider orientation="left" plain>传输协议</Divider>

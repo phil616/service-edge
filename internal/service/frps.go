@@ -87,7 +87,7 @@ func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
 	}
 	version := in.FrpVersion
 	if version == "" {
-		version = s.Cfg.FrpRelease.DefaultVersion
+		version = s.defaultFrpVersion()
 	}
 	uuid := util.NewUUID()
 

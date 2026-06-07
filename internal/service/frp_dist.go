@@ -34,6 +34,80 @@ func (s *Service) ListFRPDists() ([]model.FRPDistFile, error) {
 	return rows, nil
 }
 
+// LatestFRPDistVersion returns the highest (by semantic version) version among the
+// uploaded frp release tarballs, or "" if none have been uploaded.
+func (s *Service) LatestFRPDistVersion() string {
+	var versions []string
+	if err := s.Store.DB.Model(&model.FRPDistFile{}).Distinct("version").Pluck("version", &versions).Error; err != nil {
+		return ""
+	}
+	best := ""
+	for _, v := range versions {
+		if v == "" {
+			continue
+		}
+		if best == "" || compareFrpVersion(v, best) > 0 {
+			best = v
+		}
+	}
+	return best
+}
+
+// defaultFrpVersion is the version used when a node/host is created without an
+// explicit frp version: the latest uploaded release if any, else the configured
+// fallback. Preferring an actually-present release avoids defaulting to a version
+// no dist exists for (the configured default may not be downloadable).
+func (s *Service) defaultFrpVersion() string {
+	if v := s.LatestFRPDistVersion(); v != "" {
+		return v
+	}
+	return s.Cfg.FrpRelease.DefaultVersion
+}
+
+// compareFrpVersion compares two frp versions ("0.61.1" / "v0.61.1") numerically
+// component by component. Returns >0 if a>b, <0 if a<b, 0 if equal. Missing or
+// non-numeric components are treated as 0.
+func compareFrpVersion(a, b string) int {
+	pa := versionParts(a)
+	pb := versionParts(b)
+	n := len(pa)
+	if len(pb) > n {
+		n = len(pb)
+	}
+	for i := 0; i < n; i++ {
+		var x, y int
+		if i < len(pa) {
+			x = pa[i]
+		}
+		if i < len(pb) {
+			y = pb[i]
+		}
+		if x != y {
+			return x - y
+		}
+	}
+	return 0
+}
+
+// versionParts splits "v0.61.1" into [0,61,1]; any pre-release suffix on a
+// component (e.g. "1-rc1") is reduced to its leading integer.
+func versionParts(v string) []int {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	fields := strings.Split(v, ".")
+	out := make([]int, 0, len(fields))
+	for _, f := range fields {
+		num := 0
+		for i := 0; i < len(f); i++ {
+			if f[i] < '0' || f[i] > '9' {
+				break
+			}
+			num = num*10 + int(f[i]-'0')
+		}
+		out = append(out, num)
+	}
+	return out
+}
+
 // UploadFRPDist saves the tarball to disk and upserts its metadata row. The
 // filename must follow the GitHub release convention frp_{version}_{os}_{arch}.tar.gz.
 func (s *Service) UploadFRPDist(filename string, r io.Reader) error {

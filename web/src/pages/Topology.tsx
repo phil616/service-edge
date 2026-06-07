@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -14,12 +14,13 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { Button, Card, Drawer, Descriptions, Empty, Space, Table, Tag, Typography } from 'antd'
-import { CloudServerOutlined, ApiOutlined, ReloadOutlined } from '@ant-design/icons'
+import { CloudServerOutlined, ApiOutlined, ReloadOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getTopology } from '../api/client'
 import HostRuntime from '../components/HostRuntime'
 import { archLabel } from '../lib/format'
+import { maskIp } from '../lib/frp'
 import { PROTOCOL_LABELS, protocolLabel } from '../lib/transport'
 import type { FRPCConnection, FRPCHost, FRPSNode, ProxyMapping, Topology as TopologyData } from '../api/types'
 
@@ -29,6 +30,10 @@ const STATUS_COLOR: Record<string, string> = {
   pending: '#8c8c8c',
 }
 const STATUS_TEXT: Record<string, string> = { online: '在线', offline: '离线', pending: '待部署' }
+
+// HideIpContext lets the custom flow nodes (rendered by React Flow, outside the
+// normal props tree) read the current hide-IP toggle without rebuilding the graph.
+const HideIpContext = createContext(false)
 
 function NodeShell({ icon, title, status, lines, accent }: { icon: React.ReactNode; title: string; status: string; lines: string[]; accent: string }) {
   return (
@@ -49,6 +54,7 @@ function NodeShell({ icon, title, status, lines, accent }: { icon: React.ReactNo
 
 function FrpsFlowNode({ data }: NodeProps) {
   const n: FRPSNode = data.node
+  const hideIp = useContext(HideIpContext)
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#1677ff' }} />
@@ -57,7 +63,7 @@ function FrpsFlowNode({ data }: NodeProps) {
         title={n.name}
         status={n.status}
         accent="#1677ff"
-        lines={[`公网 ${n.public_ip || '未设置'}`, `端口 ${n.bind_port} · frp ${n.frp_version || '-'}`, `${archLabel(n.runtime?.os, n.runtime?.arch)}`]}
+        lines={[`公网 ${n.public_ip ? maskIp(n.public_ip, hideIp) : '未设置'}`, `端口 ${n.bind_port} · frp ${n.frp_version || '-'}`, `${archLabel(n.runtime?.os, n.runtime?.arch)}`]}
       />
     </>
   )
@@ -116,9 +122,9 @@ function buildGraph(topo: TopologyData): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges }
 }
 
-function accessAddr(p: ProxyMapping, publicIP?: string): string {
+function accessAddr(p: ProxyMapping, publicIP: string | undefined, hideIp: boolean): string {
   if ((p.proxy_type === 'tcp' || p.proxy_type === 'udp') && p.remote_port) {
-    return `${publicIP || '<公网IP>'}:${p.remote_port}`
+    return `${publicIP ? maskIp(publicIP, hideIp) : '<公网IP>'}:${p.remote_port}`
   }
   if (p.custom_domains) {
     try {
@@ -144,6 +150,7 @@ export default function Topology() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [sel, setSel] = useState<Selection>(null)
+  const [hideIp, setHideIp] = useState(false)
 
   useEffect(() => {
     setNodes(graph.nodes)
@@ -162,46 +169,55 @@ export default function Topology() {
   const empty = !isLoading && (data?.frps.length ?? 0) === 0 && (data?.hosts.length ?? 0) === 0
 
   return (
-    <Card
-      styles={{ body: { padding: 0 } }}
-      title={<Typography.Title level={4} style={{ margin: 0 }}>网络拓扑</Typography.Title>}
-      extra={
-        <Space>
-          <Tag color="#1677ff">FRPS 服务端</Tag>
-          <Tag color="#13a8a8">FRPC 主机</Tag>
-          <Button size="small" icon={<ReloadOutlined />} loading={isFetching} onClick={() => refetch()}>刷新</Button>
-        </Space>
-      }
-    >
-      <div style={{ height: 'calc(100vh - 220px)', minHeight: 480, position: 'relative' }}>
-        {empty ? (
-          <Empty style={{ paddingTop: 120 }} description="暂无节点，请先创建 FRPS / FRPC 主机" />
-        ) : (
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={onNodeClick}
-            onEdgeClick={onEdgeClick}
-            nodeTypes={nodeTypes}
-            fitView
-            minZoom={0.2}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={16} color="#eee" />
-            <Controls />
-            <MiniMap pannable zoomable nodeColor={(n) => (n.type === 'frps' ? '#1677ff' : '#13a8a8')} />
-          </ReactFlow>
-        )}
-      </div>
+    <HideIpContext.Provider value={hideIp}>
+      <Card
+        styles={{ body: { padding: 0 } }}
+        title={<Typography.Title level={4} style={{ margin: 0 }}>网络拓扑</Typography.Title>}
+        extra={
+          <Space>
+            <Tag color="#1677ff">FRPS 服务端</Tag>
+            <Tag color="#13a8a8">FRPC 主机</Tag>
+            <Button
+              size="small"
+              icon={hideIp ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={() => setHideIp((v) => !v)}
+            >
+              {hideIp ? '显示 IP' : '隐藏 IP'}
+            </Button>
+            <Button size="small" icon={<ReloadOutlined />} loading={isFetching} onClick={() => refetch()}>刷新</Button>
+          </Space>
+        }
+      >
+        <div style={{ height: 'calc(100vh - 220px)', minHeight: 480, position: 'relative' }}>
+          {empty ? (
+            <Empty style={{ paddingTop: 120 }} description="暂无节点，请先创建 FRPS / FRPC 主机" />
+          ) : (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={onNodeClick}
+              onEdgeClick={onEdgeClick}
+              nodeTypes={nodeTypes}
+              fitView
+              minZoom={0.2}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background gap={16} color="#eee" />
+              <Controls />
+              <MiniMap pannable zoomable nodeColor={(n) => (n.type === 'frps' ? '#1677ff' : '#13a8a8')} />
+            </ReactFlow>
+          )}
+        </div>
 
-      <DetailDrawer sel={sel} onClose={() => setSel(null)} navigate={navigate} />
-    </Card>
+        <DetailDrawer sel={sel} onClose={() => setSel(null)} navigate={navigate} hideIp={hideIp} />
+      </Card>
+    </HideIpContext.Provider>
   )
 }
 
-function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () => void; navigate: (p: string) => void }) {
+function DetailDrawer({ sel, onClose, navigate, hideIp }: { sel: Selection; onClose: () => void; navigate: (p: string) => void; hideIp: boolean }) {
   if (!sel) return <Drawer open={false} onClose={onClose} />
 
   if (sel.kind === 'edge') {
@@ -209,8 +225,8 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
     const cols = [
       { title: '名称', dataIndex: 'name' },
       { title: '协议', dataIndex: 'proxy_type', render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
-      { title: '本地', render: (_: unknown, r: ProxyMapping) => `${r.local_ip}:${r.local_port}` },
-      { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r, frps.public_ip)}</span> },
+      { title: '本地', render: (_: unknown, r: ProxyMapping) => `${maskIp(r.local_ip, hideIp)}:${r.local_port}` },
+      { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r, frps.public_ip, hideIp)}</span> },
     ]
     return (
       <Drawer open width={580} onClose={onClose} title={`${host.name} → ${frps.name}`} extra={<Button type="link" onClick={() => navigate(`/connections/${conn.uuid}`)}>打开连接</Button>}>
@@ -232,7 +248,7 @@ function DetailDrawer({ sel, onClose, navigate }: { sel: Selection; onClose: () 
         <Descriptions column={1} bordered size="small" style={{ marginBottom: 16 }}>
           <Descriptions.Item label="类型">FRPS 服务端</Descriptions.Item>
           <Descriptions.Item label="状态"><Tag color={STATUS_COLOR[n.status]}>{STATUS_TEXT[n.status] ?? n.status}</Tag></Descriptions.Item>
-          <Descriptions.Item label="公网 IP"><span className="mono">{n.public_ip || '-'}</span></Descriptions.Item>
+          <Descriptions.Item label="公网 IP"><span className="mono">{n.public_ip ? maskIp(n.public_ip, hideIp) : '-'}</span></Descriptions.Item>
           <Descriptions.Item label="服务端口">{n.bind_port}</Descriptions.Item>
           <Descriptions.Item label="frp 版本"><Tag>{n.frp_version || '-'}</Tag></Descriptions.Item>
         </Descriptions>

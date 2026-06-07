@@ -63,7 +63,7 @@ func (s *Service) GetFRPCHost(uuid string) (*model.FRPCHost, error) {
 func (s *Service) CreateFRPCHost(in CreateFRPCHostInput) (*model.FRPCHost, error) {
 	version := in.FrpVersion
 	if version == "" {
-		version = s.Cfg.FrpRelease.DefaultVersion
+		version = s.defaultFrpVersion()
 	}
 	host := &model.FRPCHost{
 		UUID:          util.NewUUID(),
