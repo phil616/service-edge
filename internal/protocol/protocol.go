@@ -60,13 +60,15 @@ type ConfigSummary struct {
 
 // StatusRequest is the low-frequency detailed report.
 type StatusRequest struct {
-	ConfigVersion int           `json:"config_version"`
-	ProcessAlive  bool          `json:"process_alive"`
-	ProcessPID    int           `json:"process_pid"`
-	FrpVersion    string        `json:"frp_version"`
-	SystemInfo    SystemInfo    `json:"system_info"`
-	FRPStatus     FRPStatus     `json:"frp_status"`
-	ConfigSummary ConfigSummary `json:"config_summary"`
+	ConnectionsOnly                 bool          `json:"connections_only,omitempty"`
+	ConnectionReportIntervalSeconds int           `json:"connection_report_interval_seconds,omitempty"`
+	ConfigVersion                   int           `json:"config_version"`
+	ProcessAlive                    bool          `json:"process_alive"`
+	ProcessPID                      int           `json:"process_pid"`
+	FrpVersion                      string        `json:"frp_version"`
+	SystemInfo                      SystemInfo    `json:"system_info"`
+	FRPStatus                       FRPStatus     `json:"frp_status"`
+	ConfigSummary                   ConfigSummary `json:"config_summary"`
 	// ListeningPorts are the TCP/UDP ports currently bound on the agent's host.
 	// The control plane uses these to detect remote_port conflicts caused by
 	// processes outside service-edge (it cannot probe hosts itself).
@@ -119,10 +121,14 @@ type HostConfigResponse struct {
 
 // ConnectionStatus is one frpc connection's live state, reported by an frpc host.
 type ConnectionStatus struct {
-	UUID          string        `json:"uuid"`
-	ProcessAlive  bool          `json:"process_alive"`
-	ProcessPID    int           `json:"process_pid"`
-	ProxyStatuses []ProxyStatus `json:"proxy_statuses,omitempty"`
+	ConfigVersion          int           `json:"config_version,omitempty"`
+	ProcessStatusAvailable bool          `json:"process_status_available,omitempty"`
+	ProxyStatusAvailable   bool          `json:"proxy_status_available,omitempty"`
+	StatusError            string        `json:"status_error,omitempty"`
+	UUID                   string        `json:"uuid"`
+	ProcessAlive           bool          `json:"process_alive"`
+	ProcessPID             int           `json:"process_pid"`
+	ProxyStatuses          []ProxyStatus `json:"proxy_statuses,omitempty"`
 }
 
 // AckRequest reports the result of applying a config version.

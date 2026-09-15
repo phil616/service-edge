@@ -25,6 +25,10 @@ func (h *Handler) AgentHeartbeat(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	if err := h.Svc.RecordAppliedVersion(atype, uuid, req.ConfigVersion); err != nil {
+		respondErr(c, err)
+		return
+	}
 	// Learn the frps public IP from the address it connects from (if unset).
 	h.Svc.NoteFRPSPublicIP(atype, uuid, c.ClientIP())
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -86,12 +90,11 @@ func (h *Handler) AgentConfig(c *gin.Context) {
 		return false
 	}
 
+	ch, unsub := h.Svc.Notifier.Subscribe(uuid)
+	defer unsub()
 	if deliver() {
 		return
 	}
-
-	ch, unsub := h.Svc.Notifier.Subscribe(uuid)
-	defer unsub()
 
 	timer := time.NewTimer(longPollTimeout)
 	defer timer.Stop()
@@ -103,6 +106,9 @@ func (h *Handler) AgentConfig(c *gin.Context) {
 		}
 		c.Status(http.StatusNotModified)
 	case <-timer.C:
+		if deliver() {
+			return
+		}
 		c.Status(http.StatusNotModified)
 	case <-c.Request.Context().Done():
 		c.Status(http.StatusNotModified)
@@ -117,6 +123,10 @@ func (h *Handler) AgentConfigAck(c *gin.Context) {
 	}
 	uuid := middleware.AgentUUID(c)
 	atype := middleware.AgentType(c)
+	if err := h.Svc.RecordConfigAck(atype, uuid, req); err != nil {
+		respondErr(c, err)
+		return
+	}
 	if req.Success {
 		h.Svc.Store.Audit(nil, "config_applied", atype, uuid, "version="+strconv.Itoa(req.ConfigVersion), c.ClientIP())
 	} else {

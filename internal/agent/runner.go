@@ -15,10 +15,12 @@ import (
 // Runner is the agent's top-level coordinator. An frps agent manages a single frp
 // process; an frpc agent is a HOST that reconciles many frpc connection processes.
 type Runner struct {
-	cfg     *Config
-	client  *Client
-	state   *State
-	systemd frp.Systemd
+	cfg         *Config
+	client      *Client
+	state       *State
+	systemd     processManager
+	operationMu sync.Mutex
+	statusMu    sync.Mutex
 
 	// frps-only: the single managed unit + its applier.
 	applier *Applier
@@ -26,7 +28,7 @@ type Runner struct {
 }
 
 func NewRunner(cfg *Config) *Runner {
-	r := &Runner{cfg: cfg, client: NewClient(cfg)}
+	r := &Runner{cfg: cfg, client: NewClient(cfg), systemd: frp.Systemd{}}
 	if cfg.AgentType == "frps" {
 		r.state = LoadState(filepath.Join(cfg.Paths().DataDir, "state.json"))
 		r.applier = NewApplier(cfg)
@@ -50,6 +52,7 @@ func (r *Runner) Run(ctx context.Context) {
 	for _, loop := range []func(context.Context){
 		r.heartbeatLoop,
 		r.statusLoop,
+		r.connectionStatusLoop,
 		r.configSyncLoop,
 		r.watchdogLoop,
 	} {
@@ -112,6 +115,8 @@ func (r *Runner) reportStatus(ctx context.Context) {
 		r.reportHostStatus(ctx)
 		return
 	}
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req := protocol.StatusRequest{
@@ -131,6 +136,7 @@ func (r *Runner) reportStatus(ctx context.Context) {
 // off exponentially up to 60s; 304 timeouts re-poll immediately.
 func (r *Runner) configSyncLoop(ctx context.Context) {
 	backoff := time.Second
+	var nextFullSync time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -139,7 +145,13 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 		}
 
 		if r.cfg.AgentType == "frpc" {
-			bundle, notModified, err := r.client.PollHostConfig(ctx, r.state.Version(), runtime.GOOS, runtime.GOARCH)
+			// Re-read the desired set on startup and periodically, even at the same
+			// version, to repair missing files and migrate old applied-state records.
+			pollVersion := r.state.Version()
+			if time.Now().After(nextFullSync) {
+				pollVersion = 0
+			}
+			bundle, notModified, err := r.client.PollHostConfig(ctx, pollVersion, runtime.GOOS, runtime.GOARCH)
 			if ctx.Err() != nil {
 				return
 			}
@@ -162,6 +174,7 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 				continue
 			}
 			backoff = time.Second
+			nextFullSync = time.Now().Add(5 * time.Minute)
 			continue
 		}
 
@@ -193,6 +206,8 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 // clean apply; on failure it leaves the applied version untouched so the caller
 // re-polls (the same bundle is re-delivered) and retries with backoff.
 func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigResponse) bool {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
 	slog.Info("new config received", "version", bundle.ConfigVersion)
 
 	// Ensure the right frp binary is installed before applying.
@@ -211,7 +226,9 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 	}
 
 	if err := r.state.Save(bundle.ConfigVersion, bundle.FrpBinary.Version); err != nil {
-		slog.Warn("failed to persist state", "err", err)
+		slog.Error("failed to persist state", "err", err)
+		r.ack(ctx, bundle.ConfigVersion, false, "persist state: "+err.Error())
+		return false
 	}
 	r.ack(ctx, bundle.ConfigVersion, true, "")
 	slog.Info("config applied", "version", bundle.ConfigVersion)
@@ -245,13 +262,15 @@ func (r *Runner) ack(ctx context.Context, version int, ok bool, errMsg string) {
 func (r *Runner) watchdogLoop(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	var restarts []time.Time
+	restarts := map[string][]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if r.state.Version() == 0 {
+			r.operationMu.Lock()
+			if r.state.Version() == 0 && len(r.state.ConnUUIDs()) == 0 {
+				r.operationMu.Unlock()
 				continue // nothing applied yet
 			}
 			units := r.managedUnits()
@@ -260,8 +279,8 @@ func (r *Runner) watchdogLoop(ctx context.Context) {
 					continue
 				}
 				now := time.Now()
-				restarts = pruneOld(restarts, now.Add(-5*time.Minute))
-				if len(restarts) >= 3 {
+				restarts[unit] = pruneOld(restarts[unit], now.Add(-5*time.Minute))
+				if len(restarts[unit]) >= 3 {
 					slog.Error("frp restart threshold reached, backing off", "unit", unit)
 					continue
 				}
@@ -269,8 +288,9 @@ func (r *Runner) watchdogLoop(ctx context.Context) {
 				if err := r.systemd.Restart(unit); err != nil {
 					slog.Error("watchdog restart failed", "unit", unit, "err", err)
 				}
-				restarts = append(restarts, now)
+				restarts[unit] = append(restarts[unit], now)
 			}
+			r.operationMu.Unlock()
 		}
 	}
 }

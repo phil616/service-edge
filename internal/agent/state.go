@@ -13,8 +13,9 @@ import (
 // frpc processes to (re)apply or stop).
 // ConnState is the applied state of one frpc connection on a host.
 type ConnState struct {
-	Version   int `json:"version"`
-	AdminPort int `json:"admin_port"`
+	Version     int    `json:"version"`
+	AdminPort   int    `json:"admin_port"`
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 type State struct {
@@ -49,28 +50,61 @@ func (s *State) Version() int {
 func (s *State) Save(configVersion int, frpVersion string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	oldVersion, oldBinary := s.ConfigVersion, s.FrpVersion
 	s.ConfigVersion = configVersion
 	if frpVersion != "" {
 		s.FrpVersion = frpVersion
 	}
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.ConfigVersion, s.FrpVersion = oldVersion, oldBinary
+		return err
+	}
+	return nil
 }
 
 // ---- frpc host helpers ----
 
-func (s *State) ConnVersion(uuid string) int { s.mu.Lock(); defer s.mu.Unlock(); return s.Connections[uuid].Version }
+func (s *State) ConnVersion(uuid string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Connections[uuid].Version
+}
 func (s *State) HasConn(uuid string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.Connections[uuid]
 	return ok
 }
-func (s *State) SetConn(uuid string, version, adminPort int) {
+
+// SetConn commits each successful instance independently, including partial bundles.
+func (s *State) SetConn(uuid string, version, adminPort int, fingerprint string) error {
 	s.mu.Lock()
-	s.Connections[uuid] = ConnState{Version: version, AdminPort: adminPort}
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	old, existed := s.Connections[uuid]
+	s.Connections[uuid] = ConnState{Version: version, AdminPort: adminPort, Fingerprint: fingerprint}
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.Connections[uuid] = old
+		} else {
+			delete(s.Connections, uuid)
+		}
+		return err
+	}
+	return nil
 }
-func (s *State) RemoveConn(uuid string) { s.mu.Lock(); delete(s.Connections, uuid); s.mu.Unlock() }
+func (s *State) RemoveConn(uuid string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, existed := s.Connections[uuid]
+	delete(s.Connections, uuid)
+	if err := s.persistLocked(); err != nil {
+		if existed {
+			s.Connections[uuid] = old
+		}
+		return err
+	}
+	return nil
+}
 func (s *State) ConnUUIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,8 +130,13 @@ func (s *State) ConnEntries() map[string]ConnState {
 func (s *State) SaveHost(hostVersion int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	old := s.ConfigVersion
 	s.ConfigVersion = hostVersion
-	return s.persistLocked()
+	if err := s.persistLocked(); err != nil {
+		s.ConfigVersion = old
+		return err
+	}
+	return nil
 }
 
 func (s *State) persistLocked() error {

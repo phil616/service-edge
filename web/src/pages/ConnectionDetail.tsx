@@ -112,13 +112,21 @@ export default function ConnectionDetail() {
     { title: '本地', render: (_: unknown, r: ProxyMapping) => `${r.local_ip}:${r.local_port}` },
     { title: '访问地址', render: (_: unknown, r: ProxyMapping) => <span className="mono">{accessAddr(r)}</span> },
     {
-      title: '状态',
-      render: (_: unknown, r: ProxyMapping) =>
-        r.inactive ? (
-          <Tooltip title={r.inactive_reason}><Tag color="error">未激活</Tag></Tooltip>
-        ) : (
-          <Tag color="success">已激活</Tag>
-        ),
+      title: '配置',
+      render: (_: unknown, r: ProxyMapping) => r.inactive
+        ? <Tooltip title={r.inactive_reason}><Tag>未启用</Tag></Tooltip>
+        : <Tag>已启用</Tag>,
+    },
+    {
+      title: '代理运行状态',
+      render: (_: unknown, r: ProxyMapping) => {
+        const expired = !data?.status_expires_at || Date.parse(data.status_expires_at) <= Date.now()
+        const status = expired || data?.status === 'unknown' || data?.status === 'offline' ? 'unknown' : r.observed_status || 'unknown'
+        const label = status === 'running' ? '已注册' : status === 'unknown' ? '未知' : status
+        return <Tooltip title={expired ? '状态已过期，等待 Agent 上报' : r.observed_error || '代理注册状态不代表业务端到端可用'}>
+          <Tag color={status === 'running' ? 'success' : status === 'unknown' ? 'default' : 'error'}>{label}</Tag>
+        </Tooltip>
+      },
     },
     {
       title: '操作',
@@ -165,7 +173,10 @@ export default function ConnectionDetail() {
             <Descriptions.Item label="目标 FRPS">{node?.name ?? data?.frps_uuid}</Descriptions.Item>
             <Descriptions.Item label="传输协议"><Tag color="geekblue">{PROTOCOL_LABELS[data?.protocol ?? 'tcp']}</Tag></Descriptions.Item>
             <Descriptions.Item label="本地 Admin 端口"><span className="mono">{data?.admin_port}</span></Descriptions.Item>
-            <Descriptions.Item label="配置版本">{data?.config_version}</Descriptions.Item>
+            <Descriptions.Item label="目标 / 已应用配置">{data?.config_version} / {data?.applied_config_version || '未确认'}</Descriptions.Item>
+            <Descriptions.Item label="进程 PID">{data?.process_pid || '-'}</Descriptions.Item>
+            <Descriptions.Item label="最近状态上报">{data?.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString() : '尚未上报'}</Descriptions.Item>
+            {data?.status_error && <Descriptions.Item label="状态说明">{data.status_error}</Descriptions.Item>}
           </Descriptions>
         </Card>
         <Card title="端口映射" extra={<Button icon={<PlusOutlined />} onClick={openAdd}>新增映射</Button>} style={{ marginBottom: 16 }}>

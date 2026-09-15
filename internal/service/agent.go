@@ -12,6 +12,7 @@ import (
 	"github.com/dreamreflex/service-edge/internal/model"
 	"github.com/dreamreflex/service-edge/internal/pki"
 	"github.com/dreamreflex/service-edge/internal/protocol"
+	"github.com/dreamreflex/service-edge/internal/store"
 )
 
 // CurrentConfigVersion returns the agent's current target config_version.
@@ -234,88 +235,190 @@ func (s *Service) RecordHeartbeat(agentType, uuid string, alive bool) error {
 // RecordStatus persists a detailed status report: host runtime for both agent
 // types, plus per-connection frp status for frpc hosts.
 func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusRequest) error {
-	now := time.Now()
-	status := "online"
-	if !req.ProcessAlive {
-		status = "offline"
-	}
-	if err := s.updateAgentLiveness(agentType, uuid, now, status); err != nil {
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		scoped := *s
+		scoped.Store = &store.Store{DB: tx}
+		now := time.Now()
+		status := "online"
+		if !req.ProcessAlive {
+			status = "offline"
+		}
+		if err := scoped.updateAgentLiveness(agentType, uuid, now, status); err != nil {
+			return err
+		}
+		if !req.ConnectionsOnly {
+			updates := map[string]any{
+				"rt_os": req.SystemInfo.OS, "rt_arch": req.SystemInfo.Arch, "rt_kernel": req.SystemInfo.Kernel,
+				"rt_memory_mb": req.SystemInfo.MemoryMB, "rt_uptime_sec": req.SystemInfo.UptimeS,
+				"rt_last_error": req.FRPStatus.LastError, "rt_reported_at": now,
+			}
+			if req.FrpVersion != "" && req.FrpVersion != "unknown" {
+				updates["rt_binary_version"] = normalizeFrpVersion(req.FrpVersion)
+			}
+			if agentType == "frps" {
+				updates["rt_process_pid"] = req.ProcessPID
+				updates["rt_active_conns"] = req.FRPStatus.ActiveConnections
+			}
+			if req.ListeningPorts != nil {
+				b, err := json.Marshal(req.ListeningPorts)
+				if err != nil {
+					return err
+				}
+				updates["rt_listen_ports"] = string(b)
+			}
+			if err := tx.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates).Error; err != nil {
+				return err
+			}
+		}
+		if err := scoped.RecordAppliedVersion(agentType, uuid, req.ConfigVersion); err != nil {
+			return err
+		}
+		if agentType == "frpc" {
+			return scoped.recordConnectionStatuses(uuid, now, req)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	updates := map[string]any{
-		"rt_os":          req.SystemInfo.OS,
-		"rt_arch":        req.SystemInfo.Arch,
-		"rt_kernel":      req.SystemInfo.Kernel,
-		"rt_memory_mb":   req.SystemInfo.MemoryMB,
-		"rt_uptime_sec":  req.SystemInfo.UptimeS,
-		"rt_last_error":  req.FRPStatus.LastError,
-		"rt_reported_at": now,
-	}
-	if agentType == "frps" {
-		updates["rt_process_pid"] = req.ProcessPID
-		updates["rt_active_conns"] = req.FRPStatus.ActiveConnections
-		if req.FrpVersion != "" {
-			updates["frp_version"] = normalizeFrpVersion(req.FrpVersion)
-		}
-	}
-	if req.ListeningPorts != nil {
-		if b, err := json.Marshal(req.ListeningPorts); err == nil {
-			updates["rt_listen_ports"] = string(b)
-		}
-	}
-	s.Store.DB.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates)
-
-	if agentType == "frpc" {
-		s.recordConnectionStatuses(uuid, now, req)
-	}
-	// An frps report refreshes the host's bound ports — heal any mappings that were
-	// stuck inactive while their remote_port was occupied but is now free.
 	if agentType == "frps" && req.ListeningPorts != nil {
 		s.ReevaluateOccupancy(uuid, req.ListeningPorts)
 	}
 	return nil
 }
 
-// recordConnectionStatuses updates each connection's liveness from the host's
-// per-connection report and reconciles proxy frp status.
-func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req protocol.StatusRequest) {
-	for _, cs := range req.Connections {
-		st := "online"
-		if !cs.ProcessAlive {
-			st = "offline"
-		}
-		s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ? AND host_uuid = ?", cs.UUID, hostUUID).
-			UpdateColumns(map[string]any{"status": st, "last_heartbeat": now, "updated_at": now})
-		s.applyProxyStatuses(cs.UUID, cs.ProxyStatuses)
+// Reports repair lost success ACKs, without letting an older report lower the
+// applied revision or overwrite the desired binary/configuration.
+func (s *Service) RecordAppliedVersion(agentType, uuid string, version int) error {
+	if version <= 0 {
+		return nil
 	}
+	return s.Store.DB.Model(modelFor(agentType)).
+		Where("uuid = ? AND config_version >= ? AND rt_applied_config_version < ?", uuid, version, version).
+		UpdateColumns(map[string]any{
+			"rt_applied_config_version": version,
+			"rt_last_apply_error":       gorm.Expr("CASE WHEN rt_last_apply_version <= ? THEN '' ELSE rt_last_apply_error END", version),
+			"rt_last_apply_version":     gorm.Expr("CASE WHEN rt_last_apply_version < ? THEN ? ELSE rt_last_apply_version END", version, version),
+		}).Error
 }
 
-// applyProxyStatuses reconciles ProxyMappings with the live frp status the frpc
-// agent reported. A proxy whose remote_port failed to bind on the frps host (frp
-// status "start error"/"check failed") is deactivated so it stops being pushed,
-// with the real frp error recorded for the user.
-func (s *Service) applyProxyStatuses(connUUID string, statuses []protocol.ProxyStatus) {
-	bumped := false
-	for _, st := range statuses {
-		if st.Status != "start error" && st.Status != "check failed" {
+func (s *Service) RecordConfigAck(agentType, uuid string, req protocol.AckRequest) error {
+	return s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		scoped := *s
+		scoped.Store = &store.Store{DB: tx}
+		if req.Success {
+			if err := scoped.RecordAppliedVersion(agentType, uuid, req.ConfigVersion); err != nil {
+				return err
+			}
+		}
+		errText := req.Error
+		if req.Success {
+			errText = ""
+		}
+		query := tx.Model(modelFor(agentType)).Where("uuid = ? AND config_version >= ? AND rt_last_apply_version <= ?", uuid, req.ConfigVersion, req.ConfigVersion)
+		if req.Success {
+			query = query.Where("rt_applied_config_version <= ?", req.ConfigVersion)
+		} else {
+			query = query.Where("rt_applied_config_version < ?", req.ConfigVersion)
+		}
+		return query.
+			UpdateColumns(map[string]any{"rt_last_apply_version": req.ConfigVersion, "rt_last_apply_error": errText}).Error
+	})
+}
+
+func connectionStatusTTL(req protocol.StatusRequest) time.Duration {
+	// Old agents report every 180s; the new lightweight channel reports every 10s.
+	if req.ConnectionReportIntervalSeconds <= 0 {
+		return 240 * time.Second
+	}
+	seconds := req.ConnectionReportIntervalSeconds
+	if seconds > 180 {
+		seconds = 180
+	}
+	ttl := time.Duration(seconds) * 3 * time.Second
+	if ttl < LivenessTimeout {
+		ttl = LivenessTimeout
+	}
+	return ttl
+}
+
+func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req protocol.StatusRequest) error {
+	for _, cs := range req.Connections {
+		var conn model.FRPCConnection
+		err := s.Store.DB.Where("uuid = ? AND host_uuid = ?", cs.UUID, hostUUID).First(&conn).Error
+		if isNotFound(err) {
 			continue
 		}
-		reason := fmt.Sprintf("frp 启动失败（%s）", st.Status)
-		if st.Err != "" {
-			reason += "：" + st.Err
+		if err != nil {
+			return err
 		}
-		reason += "；请更换远程端口或删除该映射"
-		// Only flip currently-active rows so we don't repeatedly bump the version.
-		res := s.Store.DB.Model(&model.ProxyMapping{}).
-			Where("frpc_uuid = ? AND name = ? AND inactive = ?", connUUID, st.Name, false).
-			UpdateColumns(map[string]any{"inactive": true, "inactive_reason": reason})
-		if res.Error == nil && res.RowsAffected > 0 {
-			bumped = true
+		if cs.ConfigVersion > 0 && cs.ConfigVersion < conn.AppliedConfigVersion {
+			continue
+		}
+		available := cs.ProxyStatusAvailable || cs.ProxyStatuses != nil // Legacy agents omit the availability flag.
+		st := "unknown"
+		statusError := cs.StatusError
+		if cs.ProcessStatusAvailable && !cs.ProcessAlive {
+			st = "offline"
+		} else if cs.ProcessAlive && available {
+			st = "idle"
+			if len(cs.ProxyStatuses) > 0 {
+				st = "online"
+			}
+			for _, ps := range cs.ProxyStatuses {
+				if ps.Status != "running" {
+					st = "degraded"
+					break
+				}
+			}
+		}
+		// A report for an older config must not be attached to today's proxy definitions.
+		current := cs.ConfigVersion == 0 || cs.ConfigVersion == conn.ConfigVersion
+		if !current {
+			st = "unknown"
+			statusError = "配置尚未同步"
+		}
+		expires := now.Add(connectionStatusTTL(req))
+		updates := map[string]any{"status": st, "last_heartbeat": now, "updated_at": now, "status_expires_at": expires,
+			"process_alive": cs.ProcessAlive, "process_pid": cs.ProcessPID, "status_error": statusError}
+		if cs.ConfigVersion > 0 && cs.ConfigVersion <= conn.ConfigVersion {
+			updates["applied_config_version"] = cs.ConfigVersion
+		}
+		if err := s.Store.DB.Model(&conn).UpdateColumns(updates).Error; err != nil {
+			return err
+		}
+		// Full snapshot: absent proxies and unavailable observations become unknown.
+		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ?", cs.UUID).
+			UpdateColumns(map[string]any{"observed_status": "unknown", "observed_error": statusError, "observed_at": now}).Error; err != nil {
+			return err
+		}
+		if current && available {
+			if err := s.applyProxyStatuses(cs.UUID, cs.ProxyStatuses); err != nil {
+				return err
+			}
+			var missing int64
+			if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND inactive = ? AND observed_status = ?", cs.UUID, false, "unknown").Count(&missing).Error; err != nil {
+				return err
+			}
+			if missing > 0 && (st == "online" || st == "idle") {
+				if err := s.Store.DB.Model(&conn).UpdateColumns(map[string]any{"status": "unknown", "status_error": "代理状态不完整"}).Error; err != nil {
+					return err
+				}
+			}
 		}
 	}
-	if bumped {
-		s.bumpConnection(connUUID)
+	return nil
+}
+
+// Observations never mutate desired enablement or trigger configuration restarts.
+func (s *Service) applyProxyStatuses(connUUID string, statuses []protocol.ProxyStatus) error {
+	for _, st := range statuses {
+		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND name = ?", connUUID, st.Name).
+			UpdateColumns(map[string]any{"observed_status": st.Status, "observed_error": st.Err, "observed_at": time.Now()}).Error; err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // LivenessTimeout is how long without a heartbeat before an agent that was
@@ -332,13 +435,21 @@ func (s *Service) ReapStaleAgents() int64 {
 	cutoff := time.Now().Add(-LivenessTimeout)
 	now := time.Now()
 	var total int64
-	for _, m := range []any{&model.FRPSNode{}, &model.FRPCHost{}, &model.FRPCConnection{}} {
+	for _, m := range []any{&model.FRPSNode{}, &model.FRPCHost{}} {
 		res := s.Store.DB.Model(m).
 			Where("status = ? AND (last_heartbeat IS NULL OR last_heartbeat < ?)", "online", cutoff).
 			UpdateColumns(map[string]any{"status": "offline", "updated_at": now})
 		if res.Error == nil {
 			total += res.RowsAffected
 		}
+	}
+	// Connection observation expiry is independent of the host heartbeat lease.
+	res := s.Store.DB.Model(&model.FRPCConnection{}).
+		Where("status NOT IN ?", []string{"pending", "unknown"}).
+		Where("(status_expires_at IS NOT NULL AND status_expires_at < ?) OR (status_expires_at IS NULL AND (last_heartbeat IS NULL OR last_heartbeat < ?)) OR host_uuid IN (?)", now, now.Add(-240*time.Second), s.Store.DB.Model(&model.FRPCHost{}).Select("uuid").Where("status = ?", "offline")).
+		UpdateColumns(map[string]any{"status": "unknown", "status_error": "状态已过期或 Agent 不可达", "updated_at": now})
+	if res.Error == nil {
+		total += res.RowsAffected
 	}
 	return total
 }

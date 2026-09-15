@@ -54,6 +54,12 @@ func LoadConfig(path string) (*Config, error) {
 	if c.ConfigPollTimeout == 0 {
 		c.ConfigPollTimeout = config.Duration(35 * time.Second)
 	}
+	if c.HeartbeatInterval < 0 || c.StatusReportInterval < 0 {
+		return nil, fmt.Errorf("report intervals must be positive")
+	}
+	if c.ConfigPollTimeout.Std() <= 30*time.Second {
+		return nil, fmt.Errorf("config_poll_timeout must exceed the server's 30s long-poll window")
+	}
 	return &c, nil
 }
 

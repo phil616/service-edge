@@ -1,8 +1,11 @@
 import { Badge } from 'antd'
 
-const map: Record<string, { status: 'success' | 'error' | 'default'; text: string }> = {
+const map: Record<string, { status: 'success' | 'error' | 'default' | 'warning'; text: string }> = {
   online: { status: 'success', text: '在线' },
   offline: { status: 'error', text: '离线' },
+  unknown: { status: 'default', text: '状态未知' },
+  degraded: { status: 'warning', text: '代理异常' },
+  idle: { status: 'default', text: '无活动代理' },
   pending: { status: 'default', text: '待部署' },
 }
 

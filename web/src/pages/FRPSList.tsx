@@ -10,7 +10,7 @@ import type { FRPSNode } from '../api/types'
 export default function FRPSList() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({ queryKey: ['frps'], queryFn: listFRPS })
+  const { data, isLoading } = useQuery({ queryKey: ['frps'], queryFn: listFRPS, refetchInterval: 10000 })
   const del = useMutation({
     mutationFn: deleteFRPS,
     onSuccess: () => {

@@ -1,6 +1,7 @@
 package frp
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -11,7 +12,9 @@ import (
 // `verify` subcommand for both frps and frpc that validates config syntax
 // without starting the service.
 func VerifyConfig(binaryPath, configPath string) error {
-	cmd := exec.Command(binaryPath, "verify", "-c", configPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binaryPath, "verify", "-c", configPath)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("config verify failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -21,7 +24,9 @@ func VerifyConfig(binaryPath, configPath string) error {
 
 // FrpVersion runs `<binary> --version` and returns the trimmed output.
 func FrpVersion(binaryPath string) string {
-	cmd := exec.Command(binaryPath, "--version")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binaryPath, "--version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "unknown"

@@ -14,14 +14,18 @@ type User struct {
 // embedded into both node types so the control plane can surface live host
 // details (arch, kernel, memory, uptime) and frp process state in the UI.
 type AgentRuntime struct {
-	OS                string     `gorm:"column:rt_os" json:"os,omitempty"`
-	Arch              string     `gorm:"column:rt_arch" json:"arch,omitempty"`
-	Kernel            string     `gorm:"column:rt_kernel" json:"kernel,omitempty"`
-	MemoryMB          uint64     `gorm:"column:rt_memory_mb" json:"memory_mb,omitempty"`
-	UptimeS           uint64     `gorm:"column:rt_uptime_sec" json:"uptime_sec,omitempty"`
-	ProcessPID        int        `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
-	ActiveConnections int        `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
-	FrpLastError      string     `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
+	BinaryVersion        string `gorm:"column:rt_binary_version" json:"binary_version,omitempty"`
+	AppliedConfigVersion int    `gorm:"column:rt_applied_config_version;not null;default:0" json:"applied_config_version"`
+	LastApplyVersion     int    `gorm:"column:rt_last_apply_version;not null;default:0" json:"last_apply_version"`
+	LastApplyError       string `gorm:"column:rt_last_apply_error" json:"last_apply_error,omitempty"`
+	OS                   string `gorm:"column:rt_os" json:"os,omitempty"`
+	Arch                 string `gorm:"column:rt_arch" json:"arch,omitempty"`
+	Kernel               string `gorm:"column:rt_kernel" json:"kernel,omitempty"`
+	MemoryMB             uint64 `gorm:"column:rt_memory_mb" json:"memory_mb,omitempty"`
+	UptimeS              uint64 `gorm:"column:rt_uptime_sec" json:"uptime_sec,omitempty"`
+	ProcessPID           int    `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
+	ActiveConnections    int    `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
+	FrpLastError         string `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
 	// ListenPorts is a JSON array of the host's bound ports as last reported by
 	// the agent. Kept internal (not serialized); surfaced via the port endpoints.
 	ListenPorts string     `gorm:"column:rt_listen_ports" json:"-"`
@@ -51,8 +55,8 @@ type FRPSNode struct {
 	KCPBindPort  *int         `gorm:"column:kcp_bind_port" json:"kcp_bind_port,omitempty"`
 	QUICBindPort *int         `gorm:"column:quic_bind_port" json:"quic_bind_port,omitempty"`
 	Runtime      AgentRuntime `gorm:"embedded" json:"runtime"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	CreatedAt    time.Time    `json:"created_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
 
 	TLSCertInfo any `gorm:"-" json:"tls_cert_info,omitempty"`
 }
@@ -80,11 +84,16 @@ type FRPCHost struct {
 // port and set of proxies. Its UUID is the systemd instance id
 // (service-edge-frpc@<uuid>) and the per-instance config directory.
 type FRPCConnection struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
-	UUID          string     `gorm:"column:uuid;uniqueIndex;not null" json:"uuid"`
-	HostUUID      string     `gorm:"column:host_uuid;index;not null" json:"host_uuid"`
-	Name          string     `gorm:"not null" json:"name"`
-	FRPSUUID      string     `gorm:"column:frps_uuid;index;not null" json:"frps_uuid"`
+	AppliedConfigVersion int        `gorm:"not null;default:0" json:"applied_config_version"`
+	ProcessAlive         bool       `json:"process_alive"`
+	ProcessPID           int        `gorm:"column:process_pid" json:"process_pid"`
+	StatusError          string     `json:"status_error,omitempty"`
+	StatusExpiresAt      *time.Time `json:"status_expires_at,omitempty"`
+	ID                   uint       `gorm:"primaryKey" json:"id"`
+	UUID                 string     `gorm:"column:uuid;uniqueIndex;not null" json:"uuid"`
+	HostUUID             string     `gorm:"column:host_uuid;index;not null" json:"host_uuid"`
+	Name                 string     `gorm:"not null" json:"name"`
+	FRPSUUID             string     `gorm:"column:frps_uuid;index;not null" json:"frps_uuid"`
 	// Protocol is the frpc<->frps control transport: tcp (default) | kcp | quic |
 	// websocket | wss. kcp/quic require the target node to enable the matching port.
 	Protocol      string     `gorm:"column:protocol;not null;default:tcp" json:"protocol"`
@@ -103,15 +112,18 @@ type FRPCConnection struct {
 
 // ProxyMapping is one port mapping belonging to an frpc client.
 type ProxyMapping struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	FRPCUUID      string    `gorm:"column:frpc_uuid;index;not null" json:"frpc_uuid"`
-	Name          string    `gorm:"not null" json:"name"`
-	ProxyType     string    `gorm:"column:proxy_type;not null" json:"proxy_type"` // tcp/udp/http/https
-	LocalIP       string    `gorm:"column:local_ip;default:127.0.0.1" json:"local_ip"`
-	LocalPort     int       `gorm:"column:local_port;not null" json:"local_port"`
-	RemotePort    *int      `gorm:"column:remote_port" json:"remote_port,omitempty"`
-	CustomDomains string    `gorm:"column:custom_domains" json:"custom_domains,omitempty"` // JSON array
-	Subdomain     string    `json:"subdomain,omitempty"`
+	ObservedStatus string     `json:"observed_status,omitempty"`
+	ObservedError  string     `json:"observed_error,omitempty"`
+	ObservedAt     *time.Time `json:"observed_at,omitempty"`
+	ID             uint       `gorm:"primaryKey" json:"id"`
+	FRPCUUID       string     `gorm:"column:frpc_uuid;index;not null" json:"frpc_uuid"`
+	Name           string     `gorm:"not null" json:"name"`
+	ProxyType      string     `gorm:"column:proxy_type;not null" json:"proxy_type"` // tcp/udp/http/https
+	LocalIP        string     `gorm:"column:local_ip;default:127.0.0.1" json:"local_ip"`
+	LocalPort      int        `gorm:"column:local_port;not null" json:"local_port"`
+	RemotePort     *int       `gorm:"column:remote_port" json:"remote_port,omitempty"`
+	CustomDomains  string     `gorm:"column:custom_domains" json:"custom_domains,omitempty"` // JSON array
+	Subdomain      string     `json:"subdomain,omitempty"`
 	// Inactive marks a mapping the control plane will NOT render into frp config
 	// (e.g. its remote_port is occupied by another process on the frps host).
 	// Default false (active); set true so the column backfills existing rows to
@@ -148,7 +160,7 @@ type AuditLog struct {
 type Setting struct {
 	Key       string    `gorm:"column:key;primaryKey" json:"key"`
 	Value     string    `gorm:"column:value" json:"value"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // FRPDistFile tracks an uploaded frp release tarball (e.g. frp_0.61.1_linux_amd64.tar.gz).

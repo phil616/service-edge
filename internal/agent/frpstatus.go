@@ -11,11 +11,10 @@ import (
 )
 
 // queryProxyStatusesFor fetches per-proxy status from one frpc connection's
-// localhost admin API (its dedicated admin port). Returns nil when unreachable
-// (e.g. before the connection's first config has been applied).
-func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adminPort int) []protocol.ProxyStatus {
-	if adminPort == 0 {
-		return nil
+// localhost admin API. Observation failures are explicit, never an empty success.
+func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adminPort int) ([]protocol.ProxyStatus, error) {
+	if adminPort <= 0 || adminPort > 65535 {
+		return nil, fmt.Errorf("invalid admin port %d", adminPort)
 	}
 	user, pass := protocol.FRPCAdminCreds(connUUID, r.cfg.APIToken)
 	url := fmt.Sprintf("http://%s:%d/api/status", protocol.FRPCAdminAddr, adminPort)
@@ -24,16 +23,16 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 	defer cancel()
 	req, err := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	req.SetBasicAuth(user, pass)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		return nil, fmt.Errorf("admin API status %d", resp.StatusCode)
 	}
 
 	// frpc /api/status returns a map of proxy type -> array of proxy statuses.
@@ -45,7 +44,7 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 		RemoteAddr string `json:"remote_addr"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&byType); err != nil {
-		return nil
+		return nil, err
 	}
 	var out []protocol.ProxyStatus
 	for _, group := range byType {
@@ -59,5 +58,5 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 			})
 		}
 	}
-	return out
+	return out, nil
 }

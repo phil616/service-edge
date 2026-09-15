@@ -63,7 +63,7 @@ func currentMatches(binaryPath, wantVersion string) bool {
 	}
 	v := FrpVersion(binaryPath)
 	want := strings.TrimPrefix(wantVersion, "v")
-	return strings.Contains(v, want)
+	return strings.TrimPrefix(strings.TrimSpace(v), "v") == want
 }
 
 func download(url string, dst io.Writer) error {

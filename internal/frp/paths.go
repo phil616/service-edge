@@ -5,16 +5,20 @@
 // paths), keeping the two sides in sync.
 package frp
 
-import "path/filepath"
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+)
 
 const (
 	FRPSBaseDir = "/opt/service-edge/frps-agent"
 	FRPCBaseDir = "/opt/service-edge/frpc-agent"
 
-	FRPSSystemdUnit  = "service-edge-frps"
-	FRPCSystemdUnit  = "service-edge-frpc" // template: service-edge-frpc@<uuid>.service
-	AgentFRPSUnit    = "service-edge-frps-agent"
-	AgentFRPCUnit    = "service-edge-frpc-agent"
+	FRPSSystemdUnit = "service-edge-frps"
+	FRPCSystemdUnit = "service-edge-frpc" // template: service-edge-frpc@<uuid>.service
+	AgentFRPSUnit   = "service-edge-frps-agent"
+	AgentFRPCUnit   = "service-edge-frpc-agent"
 )
 
 // FRPSPaths returns the on-disk paths for an frps agent deployment.
@@ -46,6 +50,14 @@ func FRPSPaths() DeployPaths {
 		CAFile:     filepath.Join(cfg, "ca.crt"),
 		LogFile:    filepath.Join(FRPSBaseDir, "logs", "frps.log"),
 	}
+}
+
+// FRPCInstanceDir validates the identifier before constructing a destructive-operation path.
+func FRPCInstanceDir(baseDir, uuid string) (string, error) {
+	if uuid == "" || uuid == "." || uuid == ".." || strings.ContainsAny(uuid, "/\\") {
+		return "", fmt.Errorf("invalid connection identifier %q", uuid)
+	}
+	return filepath.Join(baseDir, "instances", uuid), nil
 }
 
 // FRPCPaths returns the standard layout for one frpc instance identified by uuid.

@@ -5,6 +5,10 @@ export interface User {
 }
 
 export interface AgentRuntime {
+  binary_version?: string
+  applied_config_version?: number
+  last_apply_version?: number
+  last_apply_error?: string
   os?: string
   arch?: string
   kernel?: string
@@ -55,6 +59,9 @@ export interface FRPSNode {
 }
 
 export interface ProxyMapping {
+  observed_status?: string
+  observed_error?: string
+  observed_at?: string | null
   id: number
   frpc_uuid: string
   name: string
@@ -88,6 +95,11 @@ export interface FRPCHost {
 // FRPCConnection is one frpc process: host -> one frps, with its own transport,
 // admin port and proxies.
 export interface FRPCConnection {
+  applied_config_version?: number
+  process_alive?: boolean
+  process_pid?: number
+  status_error?: string
+  status_expires_at?: string | null
   id: number
   uuid: string
   host_uuid: string
@@ -96,7 +108,7 @@ export interface FRPCConnection {
   protocol?: TransportProtocol
   admin_port: number
   config_version: number
-  status: 'pending' | 'online' | 'offline'
+  status: 'pending' | 'online' | 'offline' | 'unknown' | 'degraded' | 'idle'
   last_heartbeat?: string | null
   tls_cert_info?: CertInfo | null
   created_at: string

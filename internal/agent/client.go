@@ -26,6 +26,10 @@ type Client struct {
 }
 
 func NewClient(cfg *Config) *Client {
+	pollTimeout := cfg.ConfigPollTimeout.Std()
+	if pollTimeout == 0 {
+		pollTimeout = 60 * time.Second
+	}
 	return &Client{
 		endpoint:  cfg.APIEndpoint,
 		token:     cfg.APIToken,
@@ -33,7 +37,7 @@ func NewClient(cfg *Config) *Client {
 		agentType: cfg.AgentType,
 		http:      &http.Client{Timeout: 15 * time.Second},
 		// Long-poll client must outlast the server's 30s hang.
-		pollHTTP: &http.Client{Timeout: 60 * time.Second},
+		pollHTTP: &http.Client{Timeout: pollTimeout},
 	}
 }
 
