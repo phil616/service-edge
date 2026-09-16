@@ -126,6 +126,7 @@ func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
 
 func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, error) {
 	var node *model.FRPSNode
+	var hosts []string
 	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		var n model.FRPSNode
 		if err := tx.Where("uuid = ?", uuid).First(&n).Error; err != nil {
@@ -170,13 +171,17 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 			return err
 		}
 		node = &n
-		return nil
+		var err error
+		hosts, err = bumpClientsOfTx(tx, uuid)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
 	// Changing the frps config also affects every frpc connected to it.
-	s.bumpClientsOf(uuid)
+	for _, host := range hosts {
+		s.Notifier.Publish(host)
+	}
 	s.Notifier.Publish(uuid)
 	return node, nil
 }
@@ -249,21 +254,18 @@ func (s *Service) HostOccupiedPorts(frpsUUID string) ([]int, error) {
 	return out, nil
 }
 
-// bumpClientsOf re-renders every frpc connection targeting an frps: it bumps each
-// connection's config_version and then bumps each owning host's aggregate version
-// (which wakes that host's long-poll).
-func (s *Service) bumpClientsOf(frpsUUID string) {
-	var conns []model.FRPCConnection
-	if err := s.Store.DB.Where("frps_uuid = ?", frpsUUID).Find(&conns).Error; err != nil || len(conns) == 0 {
-		return
+func bumpClientsOfTx(tx *gorm.DB, frpsUUID string) ([]string, error) {
+	var hosts []string
+	if err := tx.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", frpsUUID).Distinct().Pluck("host_uuid", &hosts).Error; err != nil {
+		return nil, err
 	}
-	hosts := map[string]bool{}
-	for _, c := range conns {
-		s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ?", c.UUID).
-			UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()})
-		hosts[c.HostUUID] = true
+	if err := tx.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", frpsUUID).UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()}).Error; err != nil {
+		return nil, err
 	}
-	for h := range hosts {
-		s.bumpHost(h)
+	for _, host := range hosts {
+		if err := bumpHostTx(tx, host); err != nil {
+			return nil, err
+		}
 	}
+	return hosts, nil
 }

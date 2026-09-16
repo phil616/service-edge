@@ -16,6 +16,7 @@ var version = "dev"
 
 func main() {
 	cfgPath := flag.String("config", "/opt/service-edge/agent.yaml", "path to agent.yaml")
+	checkConfig := flag.Bool("check-config", false, "validate configuration and exit")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -33,6 +34,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *checkConfig {
+		fmt.Println("Agent configuration valid")
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)

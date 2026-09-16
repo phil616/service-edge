@@ -1,23 +1,26 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"text/template"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/dreamreflex/service-edge/scripts"
 )
 
 // installScriptData is the template context for install scripts.
 type installScriptData struct {
+	AgentType        string
+	AgentConfig      string
+	EnrollmentJSON   string
 	UUID             string
 	APIEndpoint      string
 	APIToken         string
 	EnrollmentToken  string
 	AgentDownloadURL string
-	FrpVersion       string
-	FrpBaseURL       string
-	FRPDistBaseURL   string // local dist endpoint; script tries this first, falls back to FrpBaseURL
 }
 
 // RenderInstallScript renders the install script for the given enrollment token.
@@ -31,40 +34,46 @@ func (s *Service) RenderInstallScript(targetType, token string) (string, error) 
 		return "", ErrEnrollmentInvalid
 	}
 
-	var frpVersion string
 	switch targetType {
 	case "frps":
-		node, err := s.GetFRPS(tok.TargetUUID)
+		_, err := s.GetFRPS(tok.TargetUUID)
 		if err != nil {
 			return "", err
 		}
-		frpVersion = node.FrpVersion
 	case "frpc":
-		host, err := s.GetFRPCHost(tok.TargetUUID)
+		_, err := s.GetFRPCHost(tok.TargetUUID)
 		if err != nil {
 			return "", err
 		}
-		frpVersion = host.FrpVersion
 	default:
 		return "", fmt.Errorf("unknown target type %q", targetType)
 	}
 
 	data := installScriptData{
+		AgentType:        targetType,
 		UUID:             tok.TargetUUID,
 		APIEndpoint:      s.Cfg.Server.ExternalURL,
 		APIToken:         s.Cfg.AgentAPIToken,
 		EnrollmentToken:  token,
 		AgentDownloadURL: s.AgentDownloadURL(targetType),
-		FrpVersion:       frpVersion,
-		FrpBaseURL:       strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"),
-		FRPDistBaseURL:   strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/frp-dist",
 	}
 
+	cfg, err := yaml.Marshal(map[string]any{
+		"agent_type": targetType, "uuid": tok.TargetUUID, "api_endpoint": strings.TrimRight(s.Cfg.Server.ExternalURL, "/"), "api_token": s.Cfg.AgentAPIToken,
+		"heartbeat_interval": "20s", "status_report_interval": "180s", "config_poll_timeout": "60s",
+		"frp_binary_path": "/opt/service-edge/" + targetType + "-agent/bin/" + targetType,
+	})
+	if err != nil {
+		return "", err
+	}
+	data.AgentConfig = string(cfg)
+	enrollment, _ := json.Marshal(map[string]string{"uuid": tok.TargetUUID, "agent_type": targetType})
+	data.EnrollmentJSON = string(enrollment)
 	raw := scripts.FRPSInstall
 	if targetType == "frpc" {
 		raw = scripts.FRPCInstall
 	}
-	tmpl, err := template.New(targetType).Parse(raw)
+	tmpl, err := template.New(targetType).Funcs(template.FuncMap{"shquote": func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }}).Parse(scripts.AgentInstall + raw)
 	if err != nil {
 		return "", err
 	}

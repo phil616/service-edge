@@ -130,9 +130,15 @@ func (s *Service) DeleteFRPCHost(uuid string) error {
 	})
 }
 
-// bumpHost increments a host's aggregate config_version and wakes its long-poll.
-func (s *Service) bumpHost(hostUUID string) {
-	s.Store.DB.Model(&model.FRPCHost{}).Where("uuid = ?", hostUUID).
+// bumpHostTx makes the aggregate revision part of the configuration transaction.
+func bumpHostTx(tx *gorm.DB, hostUUID string) error {
+	res := tx.Model(&model.FRPCHost{}).Where("uuid = ?", hostUUID).
 		UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()})
-	s.Notifier.Publish(hostUUID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected != 1 {
+		return ErrNotFound
+	}
+	return nil
 }

@@ -3,7 +3,9 @@ package frp
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -76,4 +78,28 @@ func (s Systemd) ProcessStatus(ctx context.Context, unit string) (bool, int, err
 		return false, 0, fmt.Errorf("missing ActiveState")
 	}
 	return state == "active", pid, nil
+}
+
+// Configure owns each FRP unit. ExecStart follows the atomically switched
+// generation, binding its executable and certificates to its configuration.
+func (s Systemd) Configure(unit, binary, config string) error {
+	if strings.ContainsAny(unit, "/\\\n\r") || strings.ContainsAny(binary+config, "\n\r") {
+		return fmt.Errorf("invalid managed unit path")
+	}
+	name := unit
+	if !strings.HasSuffix(name, ".service") {
+		name += ".service"
+	}
+	path := filepath.Join("/etc/systemd/system", name)
+	content := fmt.Sprintf("[Unit]\nDescription=Service Edge managed FRP\nWants=network-online.target\nAfter=network-online.target\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\nExecStart=%s -c %s\nRestart=on-failure\nRestartSec=5s\n\n[Install]\nWantedBy=multi-user.target\n", strconv.Quote(binary), strconv.Quote(config))
+	if old, err := os.ReadFile(path); err == nil && string(old) == content {
+		return s.DaemonReload()
+	}
+	if err := os.WriteFile(path+".new", []byte(content), 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(path+".new", path); err != nil {
+		return err
+	}
+	return s.DaemonReload()
 }

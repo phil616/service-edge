@@ -9,3 +9,6 @@ var FRPSInstall string
 
 //go:embed install-frpc.sh.tmpl
 var FRPCInstall string
+
+//go:embed install-agent.sh.tmpl
+var AgentInstall string

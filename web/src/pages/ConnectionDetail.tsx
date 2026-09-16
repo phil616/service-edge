@@ -174,6 +174,7 @@ export default function ConnectionDetail() {
             <Descriptions.Item label="传输协议"><Tag color="geekblue">{PROTOCOL_LABELS[data?.protocol ?? 'tcp']}</Tag></Descriptions.Item>
             <Descriptions.Item label="本地 Admin 端口"><span className="mono">{data?.admin_port}</span></Descriptions.Item>
             <Descriptions.Item label="目标 / 已应用配置">{data?.config_version} / {data?.applied_config_version || '未确认'}</Descriptions.Item>
+            <Descriptions.Item label="已应用 FRP 版本">{data?.binary_version || '未采集'}</Descriptions.Item>
             <Descriptions.Item label="进程 PID">{data?.process_pid || '-'}</Descriptions.Item>
             <Descriptions.Item label="最近状态上报">{data?.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString() : '尚未上报'}</Descriptions.Item>
             {data?.status_error && <Descriptions.Item label="状态说明">{data.status_error}</Descriptions.Item>}

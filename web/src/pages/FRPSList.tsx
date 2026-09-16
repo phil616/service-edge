@@ -24,7 +24,7 @@ export default function FRPSList() {
     { title: 'UUID', dataIndex: 'uuid', render: (v: string) => <span className="mono">{v.slice(0, 8)}</span> },
     { title: '服务端口', dataIndex: 'bind_port' },
     { title: '公网 IP', dataIndex: 'public_ip', render: (v: string) => v || '-' },
-    { title: '状态', dataIndex: 'status', render: (v: string) => <StatusBadge status={v} /> },
+    { title: 'Agent 状态', dataIndex: 'status', render: (v: string) => <StatusBadge status={v} /> },
     { title: '配置版本', dataIndex: 'config_version' },
     {
       title: '最后心跳',

@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -89,6 +91,14 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
+	c.Server.ExternalURL = strings.TrimRight(strings.TrimSpace(c.Server.ExternalURL), "/")
+	if c.InstallScriptBase == "" {
+		c.InstallScriptBase = c.Server.ExternalURL + "/install"
+	}
+	if c.AgentDownloadBase == "" {
+		c.AgentDownloadBase = c.Server.ExternalURL + "/download/agent"
+	}
+
 	if c.Server.Listen == "" {
 		c.Server.Listen = "0.0.0.0:8443"
 	}
@@ -122,8 +132,11 @@ func (c *Config) validate() error {
 	if c.PKI.CACert == "" || c.PKI.CAKey == "" {
 		return fmt.Errorf("pki.ca_cert and pki.ca_key must be set")
 	}
-	if c.Server.ExternalURL == "" {
-		return fmt.Errorf("server.external_url must be set")
+	for name, value := range map[string]string{"server.external_url": c.Server.ExternalURL, "install_script_base": c.InstallScriptBase, "agent_download_base": c.AgentDownloadBase, "frp_release.base_url": c.FrpRelease.BaseURL} {
+		u, err := url.Parse(value)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("%s must be an HTTP(S) base URL", name)
+		}
 	}
 	return nil
 }

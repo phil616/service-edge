@@ -20,7 +20,7 @@ func TestConfigRejectsInvalidTimersAndHonorsPollTimeout(t *testing.T) {
 	}{
 		{"heartbeat_interval: '-1s'\n", false},
 		{"status_report_interval: '-1s'\n", false},
-		{"config_poll_timeout: '30s'\n", false},
+		{"config_poll_timeout: '-1s'\n", false},
 		{"config_poll_timeout: '45s'\n", true},
 	} {
 		file := filepath.Join(t.TempDir(), "agent.yaml")
@@ -74,5 +74,19 @@ func TestHostStartupReconcilesEvenWhenVersionUnchanged(t *testing.T) {
 	}
 	if state.Version() != 7 {
 		t.Fatal("snapshot changed applied host revision")
+	}
+}
+
+func TestLegacyThirtySecondConfigStillStarts(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(file, []byte("agent_type: frpc\nuuid: h\napi_endpoint: 'https://edge.example.com/'\napi_token: token\nconfig_poll_timeout: 30s\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ConfigPollTimeout.Std() != 60*time.Second || cfg.APIEndpoint != "https://edge.example.com" {
+		t.Fatal("legacy config not normalized")
 	}
 }

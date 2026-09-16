@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -13,9 +14,11 @@ import (
 // frpc processes to (re)apply or stop).
 // ConnState is the applied state of one frpc connection on a host.
 type ConnState struct {
-	Version     int    `json:"version"`
-	AdminPort   int    `json:"admin_port"`
-	Fingerprint string `json:"fingerprint,omitempty"`
+	Version        int    `json:"version"`
+	AdminPort      int    `json:"admin_port"`
+	Fingerprint    string `json:"fingerprint,omitempty"`
+	LastApplyError string `json:"last_apply_error,omitempty"`
+	BinaryVersion  string `json:"binary_version,omitempty"`
 }
 
 type State struct {
@@ -31,7 +34,10 @@ type State struct {
 func LoadState(path string) *State {
 	s := &State{path: path}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, s)
+		if err := json.Unmarshal(data, s); err != nil {
+			slog.Error("invalid persisted state; reconciling full configuration", "err", err)
+			s = &State{path: path}
+		}
 	}
 	if s.Connections == nil {
 		s.Connections = map[string]ConnState{}
@@ -77,11 +83,15 @@ func (s *State) HasConn(uuid string) bool {
 }
 
 // SetConn commits each successful instance independently, including partial bundles.
-func (s *State) SetConn(uuid string, version, adminPort int, fingerprint string) error {
+func (s *State) SetConn(uuid string, version, adminPort int, fingerprint string, binaryVersion ...string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, existed := s.Connections[uuid]
-	s.Connections[uuid] = ConnState{Version: version, AdminPort: adminPort, Fingerprint: fingerprint}
+	bin := old.BinaryVersion
+	if len(binaryVersion) > 0 {
+		bin = binaryVersion[0]
+	}
+	s.Connections[uuid] = ConnState{Version: version, AdminPort: adminPort, Fingerprint: fingerprint, BinaryVersion: bin}
 	if err := s.persistLocked(); err != nil {
 		if existed {
 			s.Connections[uuid] = old
@@ -152,4 +162,24 @@ func (s *State) persistLocked() error {
 		return err
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// Failed first applies are observable too; they are not treated as applied.
+func (s *State) SetConnFailure(uuid string, adminPort int, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, exists := s.Connections[uuid]
+	next := old
+	next.LastApplyError = message
+	next.AdminPort = adminPort
+	s.Connections[uuid] = next
+	if err := s.persistLocked(); err != nil {
+		if exists {
+			s.Connections[uuid] = old
+		} else {
+			delete(s.Connections, uuid)
+		}
+		return err
+	}
+	return nil
 }

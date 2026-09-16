@@ -212,7 +212,7 @@ export default function Settings() {
           <Descriptions.Item label="用户 ID">{data?.id}</Descriptions.Item>
         </Descriptions>
         <Typography.Paragraph type="secondary" style={{ marginTop: 16 }}>
-          前后端分离部署：前端 edge.dreamreflex.com，后端 edge-api.dreamreflex.com。认证使用 Bearer JWT，CORS 白名单限定前端域名。
+          控制平面地址由 server.external_url 配置。安装脚本和 Agent 下载地址默认从该地址派生，也可单独覆盖。前后端分离时，需配置前端 API 地址和后端 CORS 白名单。
         </Typography.Paragraph>
       </Card>
 

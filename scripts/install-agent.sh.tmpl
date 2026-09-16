@@ -1,0 +1,99 @@
+{{define "agent-install"}}#!/bin/bash
+set -euo pipefail
+umask 077
+
+AGENT_UUID={{shquote .UUID}}
+AGENT_TYPE={{shquote .AgentType}}
+API_ENDPOINT={{shquote .APIEndpoint}}
+API_TOKEN={{shquote .APIToken}}
+ENROLLMENT_TOKEN={{shquote .EnrollmentToken}}
+AGENT_DOWNLOAD_URL={{shquote .AgentDownloadURL}}
+INSTALL_DIR="/opt/service-edge/${AGENT_TYPE}-agent"
+UNIT="service-edge-${AGENT_TYPE}-agent"
+
+[[ $EUID -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
+for tool in curl systemctl flock; do command -v "$tool" >/dev/null || { echo "Missing $tool" >&2; exit 1; }; done
+case "$(uname -m)" in
+ x86_64) ARCH=amd64 ;;
+ aarch64|arm64) ARCH=arm64 ;;
+ *) echo "Unsupported architecture" >&2; exit 1 ;;
+esac
+mkdir -p "$INSTALL_DIR"/{bin,config,data,logs}
+exec 9>"$INSTALL_DIR/install.lock"
+flock -n 9 || { echo "Another installation is running" >&2; exit 1; }
+work=$(mktemp -d "$INSTALL_DIR/.install.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+
+# Preserve identity on reinstall: replacing a host identity could orphan instances.
+if [[ -f "$INSTALL_DIR/config/agent.yaml" ]]; then
+ old_uuid=$(awk '/^uuid:/ {gsub(/["\047[:space:]]/, "", $2); print $2}' "$INSTALL_DIR/config/agent.yaml")
+ [[ -z "$old_uuid" || "$old_uuid" == "$AGENT_UUID" ]] || { echo "Existing Agent has a different UUID; uninstall or migrate it first" >&2; exit 1; }
+fi
+
+curl --fail --show-error --location --connect-timeout 10 --max-time 180 --retry 3 --retry-delay 2 \
+ "${AGENT_DOWNLOAD_URL}_linux_${ARCH}" -o "$work/agent"
+chmod 0755 "$work/agent"
+"$work/agent" --version
+cat > "$work/agent.yaml" <<'SERVICE_EDGE_AGENT_CONFIG'
+{{.AgentConfig}}SERVICE_EDGE_AGENT_CONFIG
+# The downloaded binary must accept the exact generated configuration.
+"$work/agent" --config "$work/agent.yaml" --check-config
+cat > "$work/enroll.json" <<'SERVICE_EDGE_ENROLL'
+{{.EnrollmentJSON}}
+SERVICE_EDGE_ENROLL
+curl --fail --show-error --location --connect-timeout 10 --max-time 30 --retry 3 --retry-delay 2 \
+ -H "X-Agent-Token: $API_TOKEN" -H "Content-Type: application/json" \
+ --data-binary "@$work/enroll.json" "$API_ENDPOINT/api/v1/agent/enroll?token=$ENROLLMENT_TOKEN"
+
+# Stage and atomically replace files; never truncate a running Agent binary.
+if [[ -f "$INSTALL_DIR/bin/agent" ]]; then cp -p "$INSTALL_DIR/bin/agent" "$work/agent.previous"; fi
+if [[ -f "$INSTALL_DIR/config/agent.yaml" ]]; then cp -p "$INSTALL_DIR/config/agent.yaml" "$work/config.previous"; fi
+unit_path="/etc/systemd/system/$UNIT.service"
+if [[ -f "$unit_path" ]]; then cp -p "$unit_path" "$work/unit.previous"; fi
+was_active=false
+was_enabled=false
+systemctl is-active --quiet "$UNIT" && was_active=true
+systemctl is-enabled --quiet "$UNIT" && was_enabled=true
+rollback_install() {
+ trap - ERR
+ systemctl stop "$UNIT" || true
+ if [[ -f "$work/agent.previous" ]]; then mv "$work/agent.previous" "$INSTALL_DIR/bin/agent"; else rm -f "$INSTALL_DIR/bin/agent"; fi
+ if [[ -f "$work/config.previous" ]]; then mv "$work/config.previous" "$INSTALL_DIR/config/agent.yaml"; else rm -f "$INSTALL_DIR/config/agent.yaml"; fi
+ if [[ "$was_enabled" == false ]]; then systemctl disable "$UNIT" || true; fi
+ if [[ -f "$work/unit.previous" ]]; then mv "$work/unit.previous" "$unit_path"; else rm -f "$unit_path"; fi
+ systemctl daemon-reload || true
+ if [[ "$was_active" == true ]]; then systemctl restart "$UNIT" || true; fi
+ echo "Agent installation failed; restored previous installation. Inspect $INSTALL_DIR/logs/agent.log" >&2
+ exit 1
+}
+trap rollback_install ERR
+mv "$work/agent" "$INSTALL_DIR/bin/agent"
+mv "$work/agent.yaml" "$INSTALL_DIR/config/agent.yaml"
+cat > "$work/agent.service" <<EOF_UNIT
+[Unit]
+Description=Service Edge ${AGENT_TYPE} Agent
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/bin/agent --config $INSTALL_DIR/config/agent.yaml
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:$INSTALL_DIR/logs/agent.log
+StandardError=append:$INSTALL_DIR/logs/agent.log
+
+[Install]
+WantedBy=multi-user.target
+EOF_UNIT
+install -m 0644 "$work/agent.service" "/etc/systemd/system/$UNIT.service"
+systemctl daemon-reload
+systemctl enable "$UNIT"
+systemctl restart "$UNIT"
+sleep 2
+systemctl is-active --quiet "$UNIT"
+trap - ERR
+echo "Agent installed: $AGENT_UUID. FRP is downloaded and managed by the Agent after configuration sync."
+echo "Agent running does not imply the FRP tunnel is ready; check connection status in the console."
+{{end}}

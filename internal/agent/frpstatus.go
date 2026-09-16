@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -50,7 +51,7 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 	for _, group := range byType {
 		for _, p := range group {
 			out = append(out, protocol.ProxyStatus{
-				Name:       p.Name,
+				Name:       strings.TrimPrefix(p.Name, connUUID+"."),
 				Type:       p.Type,
 				Status:     p.Status,
 				Err:        p.Err,

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -40,62 +41,74 @@ func (s *Service) CurrentConfigVersion(agentType, uuid string) (int, error) {
 // MaybeRenewCert reissues and persists a leaf cert nearing expiry, bumping the
 // config_version so the renewal is delivered on the next poll.
 func (s *Service) MaybeRenewCert(agentType, uuid string) error {
-	switch agentType {
-	case "frps":
-		node, err := s.GetFRPS(uuid)
-		if err != nil {
-			return err
-		}
-		if !pki.NeedsRenewal(node.TLSCert) {
-			return nil
-		}
-		sans := []string{"frps-" + uuid}
-		if node.PublicIP != "" {
-			sans = append(sans, node.PublicIP)
-		}
-		cert, err := s.CA.IssueServerCert(uuid, sans)
-		if err != nil {
-			return err
-		}
-		node.TLSCert = cert.CertPEM
-		node.TLSKey = cert.KeyPEM
-		node.ConfigVersion++
-		node.UpdatedAt = time.Now()
-		if err := s.Store.DB.Save(node).Error; err != nil {
-			return err
-		}
-		s.Notifier.Publish(uuid)
-	case "frpc":
-		// uuid is the host; renew any of its connections' certs near expiry.
-		conns, err := s.ListConnectionsOfHost(uuid)
-		if err != nil {
-			return err
-		}
-		bumped := false
-		for _, conn := range conns {
-			if !pki.NeedsRenewal(conn.TLSCert) {
-				continue
-			}
-			cert, err := s.CA.IssueClientCert(conn.UUID)
+	changed := false
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		scoped := *s
+		scoped.Store = &store.Store{DB: tx}
+		switch agentType {
+		case "frps":
+			node, err := scoped.GetFRPS(uuid)
 			if err != nil {
 				return err
 			}
-			if err := s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ?", conn.UUID).
-				UpdateColumns(map[string]any{
-					"tls_cert":       cert.CertPEM,
-					"tls_key":        cert.KeyPEM,
-					"config_version": gorm.Expr("config_version + 1"),
-					"updated_at":     time.Now(),
-				}).Error; err != nil {
+			if !pki.NeedsRenewal(node.TLSCert) {
+				return nil
+			}
+			sans := []string{"frps-" + uuid}
+			if node.PublicIP != "" {
+				sans = append(sans, node.PublicIP)
+			}
+			cert, err := s.CA.IssueServerCert(uuid, sans)
+			if err != nil {
 				return err
 			}
-			bumped = true
+			node.TLSCert = cert.CertPEM
+			node.TLSKey = cert.KeyPEM
+			node.ConfigVersion++
+			node.UpdatedAt = time.Now()
+			if err := tx.Save(node).Error; err != nil {
+				return err
+			}
+			changed = true
+		case "frpc":
+			// uuid is the host; renew any of its connections' certs near expiry.
+			conns, err := scoped.ListConnectionsOfHost(uuid)
+			if err != nil {
+				return err
+			}
+			bumped := false
+			for _, conn := range conns {
+				if !pki.NeedsRenewal(conn.TLSCert) {
+					continue
+				}
+				cert, err := s.CA.IssueClientCert(conn.UUID)
+				if err != nil {
+					return err
+				}
+				if err := tx.Model(&model.FRPCConnection{}).Where("uuid = ?", conn.UUID).
+					UpdateColumns(map[string]any{
+						"tls_cert":       cert.CertPEM,
+						"tls_key":        cert.KeyPEM,
+						"config_version": gorm.Expr("config_version + 1"),
+						"updated_at":     time.Now(),
+					}).Error; err != nil {
+					return err
+				}
+				bumped = true
+			}
+			if bumped {
+				if err := bumpHostTx(tx, uuid); err != nil {
+					return err
+				}
+				changed = true
+			}
 		}
-		if bumped {
-			s.bumpHost(uuid)
-		}
+		return nil
+	})
+	if err == nil && changed {
+		s.Notifier.Publish(uuid)
 	}
-	return nil
+	return err
 }
 
 // BuildConfigResponse assembles the full config bundle for an agent.
@@ -129,6 +142,18 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 // agent reconciles: one ConnectionConfig per frpc process, each with its rendered
 // frpc.toml, certs and localhost admin port.
 func (s *Service) BuildHostConfig(hostUUID, osName, arch string) (*protocol.HostConfigResponse, error) {
+	var resp *protocol.HostConfigResponse
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		scoped := *s
+		scoped.Store = &store.Store{DB: tx}
+		var err error
+		resp, err = scoped.buildHostConfigSnapshot(hostUUID, osName, arch)
+		return err
+	})
+	return resp, err
+}
+
+func (s *Service) buildHostConfigSnapshot(hostUUID, osName, arch string) (*protocol.HostConfigResponse, error) {
 	if osName == "" {
 		osName = "linux"
 	}
@@ -151,12 +176,17 @@ func (s *Service) BuildHostConfig(hostUUID, osName, arch string) (*protocol.Host
 			return nil, err
 		}
 		serverAddr := node.PublicIP
+		configError := ""
+		if _, err := validateClientProtocol(*node, conn.Protocol); err != nil {
+			configError = err.Error()
+		}
 		if serverAddr == "" {
-			serverAddr = "frps-" + node.UUID // placeholder until public_ip is set
+			configError = "目标 frps 未配置可达地址，请设置 public_ip（IP 或域名）"
 		}
 		adminUser, adminPass := protocol.FRPCAdminCreds(conn.UUID, s.Cfg.AgentAPIToken)
 		resp.Connections = append(resp.Connections, protocol.ConnectionConfig{
 			UUID:          conn.UUID,
+			ConfigError:   configError,
 			ConfigVersion: conn.ConfigVersion,
 			FrpConfig:     RenderFRPCConfig(&conn, node, serverAddr, conn.Proxies, adminUser, adminPass),
 			TLSCert:       conn.TLSCert,
@@ -214,21 +244,33 @@ func (s *Service) NoteFRPSPublicIP(agentType, uuid, ip string) {
 	if parsed := net.ParseIP(ip); parsed == nil || parsed.IsLoopback() || parsed.IsUnspecified() {
 		return
 	}
-	res := s.Store.DB.Model(&model.FRPSNode{}).
-		Where("uuid = ? AND (public_ip IS NULL OR public_ip = '')", uuid).
-		Update("public_ip", ip)
-	if res.Error == nil && res.RowsAffected > 0 {
-		s.bumpClientsOf(uuid)
+	var hosts []string
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.FRPSNode{}).Where("uuid = ? AND (public_ip IS NULL OR public_ip = '')", uuid).Update("public_ip", ip)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil
+		}
+		var err error
+		hosts, err = bumpClientsOfTx(tx, uuid)
+		return err
+	})
+	if err != nil {
+		slog.Warn("record frps public address", "uuid", uuid, "error", err)
+		return
 	}
+	for _, host := range hosts {
+		s.Notifier.Publish(host)
+	}
+
 }
 
 // RecordHeartbeat updates last_heartbeat/status from a heartbeat ping.
 func (s *Service) RecordHeartbeat(agentType, uuid string, alive bool) error {
 	now := time.Now()
-	status := "online"
-	if !alive {
-		status = "offline"
-	}
+	status := "online" // Receipt proves Agent reachability, independently of FRP.
 	return s.updateAgentLiveness(agentType, uuid, now, status)
 }
 
@@ -240,11 +282,25 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 		scoped.Store = &store.Store{DB: tx}
 		now := time.Now()
 		status := "online"
-		if !req.ProcessAlive {
-			status = "offline"
-		}
+
 		if err := scoped.updateAgentLiveness(agentType, uuid, now, status); err != nil {
 			return err
+		}
+		if agentType == "frps" {
+			updates := map[string]any{}
+			updates["rt_process_reported_at"] = now
+			updates["rt_process_pid"] = req.ProcessPID
+			updates["rt_process_error"] = req.StatusError
+			updates["rt_process_alive"] = nil
+			if req.ProcessStatusAvailable {
+				updates["rt_process_alive"] = req.ProcessAlive
+			}
+			if !req.ConnectionsOnly {
+				updates["rt_active_conns"] = req.FRPStatus.ActiveConnections
+			}
+			if err := tx.Model(modelFor(agentType)).Where("uuid = ?", uuid).UpdateColumns(updates).Error; err != nil {
+				return err
+			}
 		}
 		if !req.ConnectionsOnly {
 			updates := map[string]any{
@@ -255,10 +311,7 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 			if req.FrpVersion != "" && req.FrpVersion != "unknown" {
 				updates["rt_binary_version"] = normalizeFrpVersion(req.FrpVersion)
 			}
-			if agentType == "frps" {
-				updates["rt_process_pid"] = req.ProcessPID
-				updates["rt_active_conns"] = req.FRPStatus.ActiveConnections
-			}
+
 			if req.ListeningPorts != nil {
 				b, err := json.Marshal(req.ListeningPorts)
 				if err != nil {
@@ -373,14 +426,14 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 			}
 		}
 		// A report for an older config must not be attached to today's proxy definitions.
-		current := cs.ConfigVersion == 0 || cs.ConfigVersion == conn.ConfigVersion
+		current := (cs.ConfigVersion == 0 && req.ConnectionReportIntervalSeconds == 0) || cs.ConfigVersion == conn.ConfigVersion
 		if !current {
 			st = "unknown"
-			statusError = "配置尚未同步"
+			statusError = "配置尚未同步；" + statusError
 		}
 		expires := now.Add(connectionStatusTTL(req))
 		updates := map[string]any{"status": st, "last_heartbeat": now, "updated_at": now, "status_expires_at": expires,
-			"process_alive": cs.ProcessAlive, "process_pid": cs.ProcessPID, "status_error": statusError}
+			"process_alive": cs.ProcessAlive, "process_pid": cs.ProcessPID, "status_error": statusError, "binary_version": cs.BinaryVersion}
 		if cs.ConfigVersion > 0 && cs.ConfigVersion <= conn.ConfigVersion {
 			updates["applied_config_version"] = cs.ConfigVersion
 		}
@@ -413,7 +466,7 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 // Observations never mutate desired enablement or trigger configuration restarts.
 func (s *Service) applyProxyStatuses(connUUID string, statuses []protocol.ProxyStatus) error {
 	for _, st := range statuses {
-		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND name = ?", connUUID, st.Name).
+		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND name = ?", connUUID, strings.TrimPrefix(st.Name, connUUID+".")).
 			UpdateColumns(map[string]any{"observed_status": st.Status, "observed_error": st.Err, "observed_at": time.Now()}).Error; err != nil {
 			return err
 		}
@@ -443,6 +496,8 @@ func (s *Service) ReapStaleAgents() int64 {
 			total += res.RowsAffected
 		}
 	}
+	// FRPS process observations expire independently of Agent heartbeats too.
+	s.Store.DB.Model(&model.FRPSNode{}).Where("rt_process_alive IS NOT NULL AND (rt_process_reported_at < ? OR status = ?)", now.Add(-45*time.Second), "offline").UpdateColumns(map[string]any{"rt_process_alive": nil, "rt_process_pid": 0, "rt_process_error": "进程状态已过期或 Agent 不可达"})
 	// Connection observation expiry is independent of the host heartbeat lease.
 	res := s.Store.DB.Model(&model.FRPCConnection{}).
 		Where("status NOT IN ?", []string{"pending", "unknown"}).

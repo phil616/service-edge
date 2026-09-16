@@ -71,7 +71,7 @@ export default function FRPSNew() {
 
         <Divider orientation="left" plain>传输协议</Divider>
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          TCP / WebSocket / WSS 复用上面的服务端口，无需额外配置。如需更高抗丢包/低延迟，可启用 KCP 或 QUIC（基于 UDP，需在防火墙/安全组开放对应 UDP 端口）。
+          TCP / WebSocket 复用上面的服务端口，无需额外配置。如需更高抗丢包/低延迟，可启用 KCP 或 QUIC（基于 UDP，需在防火墙/安全组开放对应 UDP 端口）。
         </Typography.Paragraph>
         <Form.Item name="kcp_enabled" label="启用 KCP（UDP）" valuePropName="checked">
           <Switch />

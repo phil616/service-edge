@@ -1,0 +1,47 @@
+name: Reliability
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - run: go test -race ./...
+      - run: go vet ./...
+  real-frp:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['0.61.1', '0.68.0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Download official FRP release
+        env:
+          FRP_VERSION: ${{ matrix.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/frp"
+          gh release download "v$FRP_VERSION" --repo fatedier/frp --pattern "frp_${FRP_VERSION}_linux_amd64.tar.gz" --dir "$RUNNER_TEMP/frp"
+          tar -xzf "$RUNNER_TEMP/frp/frp_${FRP_VERSION}_linux_amd64.tar.gz" -C "$RUNNER_TEMP/frp"
+          echo "FRP_TEST_BIN_DIR=$RUNNER_TEMP/frp/frp_${FRP_VERSION}_linux_amd64" >> "$GITHUB_ENV"
+      - name: Real traffic, disconnect, rollback and activation recovery
+        run: go test -race -tags integration ./internal/agent -run TestRealFRP -v -count=1 -timeout=8m

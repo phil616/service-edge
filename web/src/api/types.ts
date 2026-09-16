@@ -5,6 +5,9 @@ export interface User {
 }
 
 export interface AgentRuntime {
+  process_alive?: boolean | null
+  process_error?: string
+  process_reported_at?: string | null
   binary_version?: string
   applied_config_version?: number
   last_apply_version?: number
@@ -15,7 +18,7 @@ export interface AgentRuntime {
   memory_mb?: number
   uptime_sec?: number
   process_pid?: number
-  active_connections?: number
+  active_connections?: number | null
   frp_last_error?: string
   reported_at?: string | null
 }
@@ -95,6 +98,7 @@ export interface FRPCHost {
 // FRPCConnection is one frpc process: host -> one frps, with its own transport,
 // admin port and proxies.
 export interface FRPCConnection {
+  binary_version?: string
   applied_config_version?: number
   process_alive?: boolean
   process_pid?: number

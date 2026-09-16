@@ -79,13 +79,17 @@ func (s *Service) CreateConnection(hostUUID string, in CreateConnectionInput) (*
 		if err != nil {
 			return fmt.Errorf("issue client cert: %w", err)
 		}
+		adminPort, err := nextAdminPort(tx, hostUUID)
+		if err != nil {
+			return err
+		}
 		c := &model.FRPCConnection{
 			UUID:          uuid,
 			HostUUID:      hostUUID,
 			Name:          in.Name,
 			FRPSUUID:      in.FRPSUUID,
 			Protocol:      protocol,
-			AdminPort:     nextAdminPort(tx, hostUUID),
+			AdminPort:     adminPort,
 			TLSCert:       cert.CertPEM,
 			TLSKey:        cert.KeyPEM,
 			ConfigVersion: 1,
@@ -99,7 +103,12 @@ func (s *Service) CreateConnection(hostUUID string, in CreateConnectionInput) (*
 		if err != nil {
 			return err
 		}
+		names := map[string]bool{}
 		for _, pin := range in.Proxies {
+			if names[pin.Name] {
+				return fmt.Errorf("%w: duplicate proxy name %q", ErrConflict, pin.Name)
+			}
+			names[pin.Name] = true
 			if err := validateProxy(pin, used); err != nil {
 				return err
 			}
@@ -113,12 +122,12 @@ func (s *Service) CreateConnection(hostUUID string, in CreateConnectionInput) (*
 			}
 		}
 		conn = c
-		return nil
+		return bumpHostTx(tx, hostUUID)
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.bumpHost(hostUUID)
+	s.Notifier.Publish(hostUUID)
 	return s.GetConnection(conn.UUID)
 }
 
@@ -149,12 +158,15 @@ func (s *Service) UpdateConnection(uuid string, in UpdateConnectionInput) (*mode
 		}
 		c.ConfigVersion++
 		c.UpdatedAt = time.Now()
-		return tx.Save(&c).Error
+		if err := tx.Save(&c).Error; err != nil {
+			return err
+		}
+		return bumpHostTx(tx, hostUUID)
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.bumpHost(hostUUID)
+	s.Notifier.Publish(hostUUID)
 	return s.GetConnection(uuid)
 }
 
@@ -172,35 +184,43 @@ func (s *Service) DeleteConnection(uuid string) error {
 		if err := tx.Where("frpc_uuid = ?", uuid).Delete(&model.ProxyMapping{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("uuid = ?", uuid).Delete(&model.FRPCConnection{}).Error
+		if err := tx.Where("uuid = ?", uuid).Delete(&model.FRPCConnection{}).Error; err != nil {
+			return err
+		}
+		return bumpHostTx(tx, hostUUID)
 	})
 	if err != nil {
 		return err
 	}
-	s.bumpHost(hostUUID)
+	s.Notifier.Publish(hostUUID)
 	return nil
 }
 
-// nextAdminPort returns the next free localhost admin port for a host's
-// connections (base + count), so multiple frpc processes don't collide on 7400.
-func nextAdminPort(tx *gorm.DB, hostUUID string) int {
-	var maxPort *int
-	tx.Model(&model.FRPCConnection{}).Where("host_uuid = ?", hostUUID).
-		Select("MAX(admin_port)").Scan(&maxPort)
-	if maxPort == nil || *maxPort < adminPortBase {
-		return adminPortBase
+// nextAdminPort reuses gaps and fails explicitly when the host exhausts ports.
+func nextAdminPort(tx *gorm.DB, hostUUID string) (int, error) {
+	var ports []int
+	if err := tx.Model(&model.FRPCConnection{}).Where("host_uuid = ?", hostUUID).Pluck("admin_port", &ports).Error; err != nil {
+		return 0, err
 	}
-	return *maxPort + 1
+	used := map[int]bool{}
+	for _, port := range ports {
+		used[port] = true
+	}
+	for port := adminPortBase; port <= 65535; port++ {
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("%w: no available admin port", ErrConflict)
 }
 
-// bumpConnection increments one connection's config_version then bumps its host's
-// aggregate version (which wakes the host's long-poll).
-func (s *Service) bumpConnection(connUUID string) {
+func bumpConnectionTx(tx *gorm.DB, connUUID string) (string, error) {
 	var conn model.FRPCConnection
-	if err := s.Store.DB.Where("uuid = ?", connUUID).First(&conn).Error; err != nil {
-		return
+	if err := tx.Where("uuid = ?", connUUID).First(&conn).Error; err != nil {
+		return "", err
 	}
-	s.Store.DB.Model(&model.FRPCConnection{}).Where("uuid = ?", connUUID).
-		UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()})
-	s.bumpHost(conn.HostUUID)
+	if err := tx.Model(&conn).UpdateColumns(map[string]any{"config_version": gorm.Expr("config_version + 1"), "updated_at": time.Now()}).Error; err != nil {
+		return "", err
+	}
+	return conn.HostUUID, bumpHostTx(tx, conn.HostUUID)
 }

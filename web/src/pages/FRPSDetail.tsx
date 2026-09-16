@@ -112,7 +112,7 @@ export default function FRPSDetail() {
           )}
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="UUID"><span className="mono">{data?.uuid}</span></Descriptions.Item>
-            <Descriptions.Item label="状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
+            <Descriptions.Item label="Agent 状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
             <Descriptions.Item label="服务端口">{data?.bind_port}</Descriptions.Item>
             <Descriptions.Item label="公网 IP">
               {data?.public_ip ? <span className="mono">{data.public_ip}</span> : <Typography.Text type="warning">未设置</Typography.Text>}
@@ -193,7 +193,7 @@ export default function FRPSDetail() {
 
           <Divider orientation="left" plain>传输协议</Divider>
           <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-            TCP / WebSocket / WSS 复用服务端口。KCP / QUIC 基于 UDP，需在防火墙开放对应端口。关闭开关即停用该传输（仍在使用它的客户端需改用其他协议）。
+            TCP / WebSocket 复用服务端口。KCP / QUIC 基于 UDP，需在防火墙开放对应端口。关闭开关即停用该传输（仍在使用它的客户端需改用其他协议）。
           </Typography.Paragraph>
           <Form.Item name="kcp_enabled" label="启用 KCP（UDP）" valuePropName="checked">
             <Switch />

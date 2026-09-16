@@ -28,6 +28,9 @@ func RenderFRPSConfig(node *model.FRPSNode) string {
 	b.WriteString("\n")
 	b.WriteString("auth.method = \"token\"\n")
 	fmt.Fprintf(&b, "auth.token = %q\n\n", node.FrpToken)
+	b.WriteString("transport.tcpMuxKeepaliveInterval = 10\n")
+	b.WriteString("transport.quic.keepalivePeriod = 5\n")
+	b.WriteString("transport.quic.maxIdleTimeout = 15\n")
 	b.WriteString("transport.tls.force = true\n")
 	fmt.Fprintf(&b, "transport.tls.certFile = %q\n", p.CertFile)
 	fmt.Fprintf(&b, "transport.tls.keyFile = %q\n", p.KeyFile)
@@ -55,6 +58,8 @@ func RenderFRPCConfig(conn *model.FRPCConnection, node *model.FRPSNode, serverAd
 	p := frp.FRPCPaths(conn.UUID)
 	proto, _ := normalizeProtocol(conn.Protocol)
 	var b strings.Builder
+	fmt.Fprintf(&b, "user = %q\n", conn.UUID)
+	b.WriteString("loginFailExit = false\n")
 	fmt.Fprintf(&b, "serverAddr = %q\n", serverAddr)
 	// serverPort depends on the transport: kcp/quic dial their UDP port, the rest
 	// ride the TCP bindPort.
@@ -64,6 +69,10 @@ func RenderFRPCConfig(conn *model.FRPCConnection, node *model.FRPSNode, serverAd
 	if proto != ProtoTCP {
 		fmt.Fprintf(&b, "transport.protocol = %q\n", proto)
 	}
+	b.WriteString("transport.tcpMuxKeepaliveInterval = 10\n")
+	b.WriteString("transport.quic.keepalivePeriod = 5\n")
+	b.WriteString("transport.quic.maxIdleTimeout = 15\n")
+	b.WriteString("transport.dialServerKeepalive = 30\n")
 	b.WriteString("transport.tls.enable = true\n")
 	fmt.Fprintf(&b, "transport.tls.certFile = %q\n", p.CertFile)
 	fmt.Fprintf(&b, "transport.tls.keyFile = %q\n", p.KeyFile)

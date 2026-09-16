@@ -49,7 +49,7 @@ type HeartbeatRequest struct {
 
 // FRPStatus is a coarse view of the managed frp process.
 type FRPStatus struct {
-	ActiveConnections int    `json:"active_connections"`
+	ActiveConnections *int   `json:"active_connections"`
 	LastError         string `json:"last_error"`
 }
 
@@ -60,6 +60,8 @@ type ConfigSummary struct {
 
 // StatusRequest is the low-frequency detailed report.
 type StatusRequest struct {
+	ProcessStatusAvailable          bool          `json:"process_status_available,omitempty"`
+	StatusError                     string        `json:"status_error,omitempty"`
 	ConnectionsOnly                 bool          `json:"connections_only,omitempty"`
 	ConnectionReportIntervalSeconds int           `json:"connection_report_interval_seconds,omitempty"`
 	ConfigVersion                   int           `json:"config_version"`
@@ -101,6 +103,7 @@ type ConfigResponse struct {
 
 // ConnectionConfig is one frpc process's config inside a host bundle.
 type ConnectionConfig struct {
+	ConfigError   string `json:"config_error,omitempty"`
 	UUID          string `json:"uuid"`
 	ConfigVersion int    `json:"config_version"`
 	FrpConfig     string `json:"frp_config"`
@@ -121,6 +124,7 @@ type HostConfigResponse struct {
 
 // ConnectionStatus is one frpc connection's live state, reported by an frpc host.
 type ConnectionStatus struct {
+	BinaryVersion          string        `json:"binary_version,omitempty"`
 	ConfigVersion          int           `json:"config_version,omitempty"`
 	ProcessStatusAvailable bool          `json:"process_status_available,omitempty"`
 	ProxyStatusAvailable   bool          `json:"proxy_status_available,omitempty"`

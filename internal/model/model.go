@@ -14,18 +14,21 @@ type User struct {
 // embedded into both node types so the control plane can surface live host
 // details (arch, kernel, memory, uptime) and frp process state in the UI.
 type AgentRuntime struct {
-	BinaryVersion        string `gorm:"column:rt_binary_version" json:"binary_version,omitempty"`
-	AppliedConfigVersion int    `gorm:"column:rt_applied_config_version;not null;default:0" json:"applied_config_version"`
-	LastApplyVersion     int    `gorm:"column:rt_last_apply_version;not null;default:0" json:"last_apply_version"`
-	LastApplyError       string `gorm:"column:rt_last_apply_error" json:"last_apply_error,omitempty"`
-	OS                   string `gorm:"column:rt_os" json:"os,omitempty"`
-	Arch                 string `gorm:"column:rt_arch" json:"arch,omitempty"`
-	Kernel               string `gorm:"column:rt_kernel" json:"kernel,omitempty"`
-	MemoryMB             uint64 `gorm:"column:rt_memory_mb" json:"memory_mb,omitempty"`
-	UptimeS              uint64 `gorm:"column:rt_uptime_sec" json:"uptime_sec,omitempty"`
-	ProcessPID           int    `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
-	ActiveConnections    int    `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
-	FrpLastError         string `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
+	ProcessReportedAt    *time.Time `gorm:"column:rt_process_reported_at" json:"process_reported_at,omitempty"`
+	ProcessAlive         *bool      `gorm:"column:rt_process_alive" json:"process_alive"`
+	ProcessError         string     `gorm:"column:rt_process_error" json:"process_error,omitempty"`
+	BinaryVersion        string     `gorm:"column:rt_binary_version" json:"binary_version,omitempty"`
+	AppliedConfigVersion int        `gorm:"column:rt_applied_config_version;not null;default:0" json:"applied_config_version"`
+	LastApplyVersion     int        `gorm:"column:rt_last_apply_version;not null;default:0" json:"last_apply_version"`
+	LastApplyError       string     `gorm:"column:rt_last_apply_error" json:"last_apply_error,omitempty"`
+	OS                   string     `gorm:"column:rt_os" json:"os,omitempty"`
+	Arch                 string     `gorm:"column:rt_arch" json:"arch,omitempty"`
+	Kernel               string     `gorm:"column:rt_kernel" json:"kernel,omitempty"`
+	MemoryMB             uint64     `gorm:"column:rt_memory_mb" json:"memory_mb,omitempty"`
+	UptimeS              uint64     `gorm:"column:rt_uptime_sec" json:"uptime_sec,omitempty"`
+	ProcessPID           int        `gorm:"column:rt_process_pid" json:"process_pid,omitempty"`
+	ActiveConnections    *int       `gorm:"column:rt_active_conns" json:"active_connections,omitempty"`
+	FrpLastError         string     `gorm:"column:rt_last_error" json:"frp_last_error,omitempty"`
 	// ListenPorts is a JSON array of the host's bound ports as last reported by
 	// the agent. Kept internal (not serialized); surfaced via the port endpoints.
 	ListenPorts string     `gorm:"column:rt_listen_ports" json:"-"`
@@ -84,6 +87,7 @@ type FRPCHost struct {
 // port and set of proxies. Its UUID is the systemd instance id
 // (service-edge-frpc@<uuid>) and the per-instance config directory.
 type FRPCConnection struct {
+	BinaryVersion        string     `json:"binary_version,omitempty"`
 	AppliedConfigVersion int        `gorm:"not null;default:0" json:"applied_config_version"`
 	ProcessAlive         bool       `json:"process_alive"`
 	ProcessPID           int        `gorm:"column:process_pid" json:"process_pid"`

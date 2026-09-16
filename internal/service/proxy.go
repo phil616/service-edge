@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -44,9 +46,12 @@ func (p ProxyMappingInput) toModel(frpcUUID string) model.ProxyMapping {
 }
 
 func validateProxy(p ProxyMappingInput, usedPorts map[int]bool) error {
+	if strings.TrimSpace(p.Name) == "" || p.LocalPort < 1 || p.LocalPort > 65535 {
+		return fmt.Errorf("%w: proxy requires name and local_port in 1..65535", ErrConflict)
+	}
 	switch p.ProxyType {
 	case "tcp", "udp":
-		if p.RemotePort == nil || *p.RemotePort <= 0 {
+		if p.RemotePort == nil || (*p.RemotePort <= 0 || *p.RemotePort > 65535) {
 			return fmt.Errorf("%w: %s proxy %q requires remote_port", ErrConflict, p.ProxyType, p.Name)
 		}
 		if usedPorts[*p.RemotePort] {
@@ -72,6 +77,7 @@ func (s *Service) ListProxies(frpcUUID string) ([]model.ProxyMapping, error) {
 
 func (s *Service) AddProxy(connUUID string, in ProxyMappingInput) (*model.ProxyMapping, error) {
 	var row model.ProxyMapping
+	var hostUUID string
 	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		var c model.FRPCConnection
 		if err := tx.Where("uuid = ?", connUUID).First(&c).Error; err != nil {
@@ -91,22 +97,29 @@ func (s *Service) AddProxy(connUUID string, in ProxyMappingInput) (*model.ProxyM
 		if err := validateProxy(in, used); err != nil {
 			return err
 		}
+		if err := uniqueProxyName(tx, connUUID, in.Name, 0); err != nil {
+			return err
+		}
 		row = in.toModel(connUUID)
 		// Host-occupancy check: a remote_port held by a non-service-edge process
 		// on the frps host cannot bind, so the mapping is created inactive.
 		setHostOccupancy(&row, externalPorts(node, used))
-		return tx.Create(&row).Error
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		hostUUID, err = bumpConnectionTx(tx, connUUID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.bumpConnection(connUUID)
+	s.Notifier.Publish(hostUUID)
 	return &row, nil
 }
 
 func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMapping, error) {
 	var row model.ProxyMapping
-	var connUUID string
+	var connUUID, hostUUID string
 	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.First(&row, id).Error; err != nil {
 			if isNotFound(err) {
@@ -140,32 +153,58 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 		if row.RemotePort != nil {
 			delete(external, *row.RemotePort)
 		}
+		if err := uniqueProxyName(tx, connUUID, in.Name, row.ID); err != nil {
+			return err
+		}
 		updated := in.toModel(connUUID)
 		updated.ID = row.ID
 		updated.CreatedAt = row.CreatedAt
 		setHostOccupancy(&updated, external)
 		row = updated
-		return tx.Save(&row).Error
+		if err := tx.Save(&row).Error; err != nil {
+			return err
+		}
+		hostUUID, err = bumpConnectionTx(tx, connUUID)
+		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	s.bumpConnection(connUUID)
+	s.Notifier.Publish(hostUUID)
 	return &row, nil
 }
 
 func (s *Service) DeleteProxy(id uint) error {
-	var row model.ProxyMapping
-	if err := s.Store.DB.First(&row, id).Error; err != nil {
-		if isNotFound(err) {
-			return ErrNotFound
+	var hostUUID string
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+		var row model.ProxyMapping
+		if err := tx.First(&row, id).Error; err != nil {
+			if isNotFound(err) {
+				return ErrNotFound
+			}
+			return err
 		}
+		if err := tx.Delete(&row).Error; err != nil {
+			return err
+		}
+		var err error
+		hostUUID, err = bumpConnectionTx(tx, row.FRPCUUID)
+		return err
+	})
+	if err == nil {
+		s.Notifier.Publish(hostUUID)
+	}
+	return err
+}
+
+func uniqueProxyName(tx *gorm.DB, connUUID, name string, exclude uint) error {
+	var count int64
+	if err := tx.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND name = ? AND id <> ?", connUUID, name, exclude).Count(&count).Error; err != nil {
 		return err
 	}
-	if err := s.Store.DB.Delete(&model.ProxyMapping{}, id).Error; err != nil {
-		return err
+	if count > 0 {
+		return fmt.Errorf("%w: duplicate proxy name %q", ErrConflict, name)
 	}
-	s.bumpConnection(row.FRPCUUID)
 	return nil
 }
 
@@ -196,24 +235,30 @@ func (s *Service) ReevaluateOccupancy(frpsUUID string, listenPorts []int) {
 		Find(&rows).Error; err != nil {
 		return
 	}
-	reactivated := map[string]bool{}
 	for _, row := range rows {
-		if row.ProxyType != "tcp" && row.ProxyType != "udp" {
+		if (row.ProxyType != "tcp" && row.ProxyType != "udp") || row.RemotePort == nil || bound[*row.RemotePort] {
 			continue
 		}
-		if row.RemotePort == nil || bound[*row.RemotePort] {
-			continue // port still held by something — leave inactive
+		var hostUUID string
+		err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
+			res := tx.Model(&model.ProxyMapping{}).Where("id = ? AND inactive = ? AND remote_port = ?", row.ID, true, *row.RemotePort).UpdateColumns(map[string]any{"inactive": false, "inactive_reason": ""})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return nil
+			}
+			var err error
+			hostUUID, err = bumpConnectionTx(tx, row.FRPCUUID)
+			return err
+		})
+		if err != nil {
+			slog.Warn("reactivate proxy", "id", row.ID, "error", err)
+		} else if hostUUID != "" {
+			s.Notifier.Publish(hostUUID)
 		}
-		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("id = ?", row.ID).
-			UpdateColumns(map[string]any{"inactive": false, "inactive_reason": ""}).Error; err != nil {
-			continue
-		}
-		reactivated[row.FRPCUUID] = true
 	}
-	// Bump each affected connection so the now-active mapping is rendered & delivered.
-	for connUUID := range reactivated {
-		s.bumpConnection(connUUID)
-	}
+
 }
 
 // parseListenPorts decodes the JSON port array an agent reported for its host.

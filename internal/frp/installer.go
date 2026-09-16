@@ -3,6 +3,7 @@ package frp
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -20,6 +21,26 @@ import (
 // extracting it from downloadURL if missing or out of date. If wantSHA256 is
 // set, the downloaded tarball is verified against it.
 func EnsureBinary(binaryPath, downloadURL, wantVersion, wantSHA256 string) error {
+	return ensureBinary(context.Background(), binaryPath, downloadURL, wantVersion, wantSHA256)
+}
+
+// PrepareBinary never overwrites the executable used by an existing instance.
+func PrepareBinary(ctx context.Context, binaryPath, downloadURL, wantVersion, wantSHA256 string) (string, error) {
+	version := strings.TrimPrefix(wantVersion, "v")
+	if version == "" || version == "." || version == ".." || strings.ContainsAny(version, "/\\") {
+		return "", fmt.Errorf("invalid frp version")
+	}
+	dest := filepath.Join(filepath.Dir(binaryPath), "releases", version, filepath.Base(binaryPath))
+	if currentMatches(binaryPath, wantVersion) {
+		return binaryPath, nil
+	}
+	if err := ensureBinary(ctx, dest, downloadURL, wantVersion, wantSHA256); err != nil {
+		return "", err
+	}
+	return dest, nil
+}
+
+func ensureBinary(ctx context.Context, binaryPath, downloadURL, wantVersion, wantSHA256 string) error {
 	wantBin := filepath.Base(binaryPath) // "frps" or "frpc"
 
 	if currentMatches(binaryPath, wantVersion) {
@@ -35,7 +56,7 @@ func EnsureBinary(binaryPath, downloadURL, wantVersion, wantSHA256 string) error
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if err := download(downloadURL, tmp); err != nil {
+	if err := downloadContext(ctx, downloadURL, tmp); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -47,7 +68,22 @@ func EnsureBinary(binaryPath, downloadURL, wantVersion, wantSHA256 string) error
 		}
 	}
 
-	if err := extractBinary(tmpPath, wantBin, binaryPath); err != nil {
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0755); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(binaryPath), ".download-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	candidate := filepath.Join(stage, wantBin)
+	if err := extractBinary(tmpPath, wantBin, candidate); err != nil {
+		return err
+	}
+	if !currentMatches(candidate, wantVersion) {
+		return fmt.Errorf("downloaded frp executable has wrong version or cannot run")
+	}
+	if err := os.Rename(candidate, binaryPath); err != nil {
 		return err
 	}
 	slog.Info("frp binary installed", "path", binaryPath)
@@ -67,8 +103,15 @@ func currentMatches(binaryPath, wantVersion string) bool {
 }
 
 func download(url string, dst io.Writer) error {
+	return downloadContext(context.Background(), url, dst)
+}
+func downloadContext(ctx context.Context, url string, dst io.Writer) error {
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
 	}

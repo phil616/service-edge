@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -27,11 +28,11 @@ type Client struct {
 
 func NewClient(cfg *Config) *Client {
 	pollTimeout := cfg.ConfigPollTimeout.Std()
-	if pollTimeout == 0 {
+	if pollTimeout <= 30*time.Second {
 		pollTimeout = 60 * time.Second
 	}
 	return &Client{
-		endpoint:  cfg.APIEndpoint,
+		endpoint:  strings.TrimRight(strings.TrimSpace(cfg.APIEndpoint), "/"),
 		token:     cfg.APIToken,
 		uuid:      cfg.UUID,
 		agentType: cfg.AgentType,
@@ -63,8 +64,9 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: status %d: %s", path, resp.StatusCode, string(b))
 	}
 	return nil
@@ -99,8 +101,9 @@ func (c *Client) Enroll(ctx context.Context, token string, req protocol.EnrollRe
 		return err
 	}
 	defer resp.Body.Close()
+	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("enroll: status %d: %s", resp.StatusCode, string(b))
 	}
 	return nil
@@ -124,6 +127,7 @@ func (c *Client) PollConfig(ctx context.Context, currentVersion int, osName, arc
 		return nil, false, err
 	}
 	defer resp.Body.Close()
+	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	switch resp.StatusCode {
 	case http.StatusNotModified:
@@ -135,7 +139,7 @@ func (c *Client) PollConfig(ctx context.Context, currentVersion int, osName, arc
 		}
 		return &out, false, nil
 	default:
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, false, fmt.Errorf("config poll: status %d: %s", resp.StatusCode, string(b))
 	}
 }
@@ -159,6 +163,7 @@ func (c *Client) PollHostConfig(ctx context.Context, currentVersion int, osName,
 		return nil, false, err
 	}
 	defer resp.Body.Close()
+	defer io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	switch resp.StatusCode {
 	case http.StatusNotModified:
@@ -170,7 +175,7 @@ func (c *Client) PollHostConfig(ctx context.Context, currentVersion int, osName,
 		}
 		return &out, false, nil
 	default:
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, false, fmt.Errorf("host config poll: status %d: %s", resp.StatusCode, string(b))
 	}
 }

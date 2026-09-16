@@ -59,6 +59,10 @@ func (s *Service) ConsumeEnrollment(token, agentUUID, agentType string) (*model.
 		if t.TargetUUID != agentUUID || t.TargetType != agentType {
 			return ErrEnrollmentInvalid
 		}
+		// Retrying the same bound enrollment after a lost HTTP response is safe.
+		if t.UsedAt != nil {
+			return nil
+		}
 		now := time.Now()
 		res := tx.Model(&model.EnrollmentToken{}).
 			Where("token = ? AND used_at IS NULL", token).

@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/dreamreflex/service-edge/internal/frp"
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -55,32 +57,7 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		}
 		desired[conn.UUID] = true
 	}
-	if bundle.FrpBinary.DownloadURL != "" {
-		if err := frp.EnsureBinary(r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256); err != nil {
-			r.ack(ctx, bundle.ConfigVersion, false, "binary install: "+err.Error())
-			return false
-		}
-	}
 	var errs []string
-	applied := r.state.ConnEntries()
-	for _, conn := range bundle.Connections {
-		fingerprint := connectionFingerprint(conn, bundle.CACert, bundle.FrpBinary.Version)
-		if st, ok := applied[conn.UUID]; ok && st.Fingerprint == fingerprint && connectionFilesExist(conn.UUID) {
-			if st.Version != conn.ConfigVersion {
-				if err := r.state.SetConn(conn.UUID, conn.ConfigVersion, conn.AdminPort, fingerprint); err != nil {
-					errs = append(errs, conn.UUID+": persist: "+err.Error())
-				}
-			}
-			continue
-		}
-		if err := r.applyConnection(conn, bundle.CACert); err != nil {
-			errs = append(errs, conn.UUID+": "+err.Error())
-			continue
-		}
-		if err := r.state.SetConn(conn.UUID, conn.ConfigVersion, conn.AdminPort, fingerprint); err != nil {
-			errs = append(errs, conn.UUID+": persist: "+err.Error())
-		}
-	}
 	for _, uuid := range r.state.ConnUUIDs() {
 		if desired[uuid] {
 			continue
@@ -91,6 +68,50 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		}
 		if err := r.state.RemoveConn(uuid); err != nil {
 			errs = append(errs, uuid+": persist removal: "+err.Error())
+		}
+	}
+	binary := r.cfg.FrpBinaryPath
+	if len(bundle.Connections) > 0 {
+		var err error
+		binary, err = frp.PrepareBinary(ctx, r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256)
+		if err != nil {
+			for _, conn := range bundle.Connections {
+				if persistErr := r.state.SetConnFailure(conn.UUID, conn.AdminPort, "prepare binary: "+err.Error()); persistErr != nil {
+					slog.Error("persist connection failure", "uuid", conn.UUID, "error", persistErr)
+				}
+			}
+			r.scheduleStatusReport(ctx)
+			r.ack(ctx, bundle.ConfigVersion, false, "prepare binary: "+err.Error())
+			return false
+		}
+	}
+	applied := r.state.ConnEntries()
+	for _, conn := range bundle.Connections {
+		if conn.ConfigError != "" {
+			errs = append(errs, conn.UUID+": "+conn.ConfigError)
+			if err := r.state.SetConnFailure(conn.UUID, conn.AdminPort, conn.ConfigError); err != nil {
+				errs = append(errs, err.Error())
+			}
+			continue
+		}
+		fingerprint := connectionFingerprint(conn, bundle.CACert, bundle.FrpBinary.Version)
+		if st, ok := applied[conn.UUID]; ok && st.Fingerprint == fingerprint && connectionFilesExist(conn.UUID) && r.processNotStopped(ctx, frpcUnit(conn.UUID)) {
+			if st.Version != conn.ConfigVersion || st.LastApplyError != "" {
+				if err := r.state.SetConn(conn.UUID, conn.ConfigVersion, conn.AdminPort, fingerprint, bundle.FrpBinary.Version); err != nil {
+					errs = append(errs, conn.UUID+": persist: "+err.Error())
+				}
+			}
+			continue
+		}
+		if err := r.applyConnection(conn, bundle.CACert, binary); err != nil {
+			errs = append(errs, conn.UUID+": "+err.Error())
+			if persistErr := r.state.SetConnFailure(conn.UUID, conn.AdminPort, err.Error()); persistErr != nil {
+				errs = append(errs, conn.UUID+": persist failure: "+persistErr.Error())
+			}
+			continue
+		}
+		if err := r.state.SetConn(conn.UUID, conn.ConfigVersion, conn.AdminPort, fingerprint, bundle.FrpBinary.Version); err != nil {
+			errs = append(errs, conn.UUID+": persist: "+err.Error())
 		}
 	}
 	if len(errs) == 0 {
@@ -109,8 +130,8 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 
 func connectionFilesExist(uuid string) bool {
 	p := frp.FRPCPaths(uuid)
-	for _, path := range []string{p.ConfigFile, p.CertFile, p.KeyFile, p.CAFile} {
-		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+	for _, name := range []string{filepath.Base(p.ConfigFile), filepath.Base(p.CertFile), filepath.Base(p.KeyFile), filepath.Base(p.CAFile), "frpc", "activated"} {
+		if info, err := os.Stat(filepath.Join(p.ConfigDir, "current", name)); err != nil || !info.Mode().IsRegular() {
 			return false
 		}
 	}
@@ -119,8 +140,8 @@ func connectionFilesExist(uuid string) bool {
 
 // applyConnection writes one connection's config/certs and (re)starts its frpc
 // process, reusing the per-instance applier (atomic apply with rollback).
-func (r *Runner) applyConnection(conn protocol.ConnectionConfig, caCert string) error {
-	applier := NewConnectionApplier(conn.UUID, r.cfg.FrpBinaryPath)
+func (r *Runner) applyConnection(conn protocol.ConnectionConfig, caCert, binary string) error {
+	applier := NewConnectionApplier(conn.UUID, binary)
 	cr := &protocol.ConfigResponse{
 		ConfigVersion: conn.ConfigVersion,
 		FrpConfig:     conn.FrpConfig,
@@ -157,4 +178,12 @@ func removeConnection(manager processManager, baseDir, uuid string) error {
 		return err
 	}
 	return os.RemoveAll(dir)
+}
+
+func (r *Runner) processNotStopped(ctx context.Context, unit string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	active, _, err := r.systemd.ProcessStatus(ctx, unit)
+	// An unavailable observation is not a reason to restart a working tunnel.
+	return err != nil || active
 }

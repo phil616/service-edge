@@ -1,6 +1,6 @@
 server:
   listen: "0.0.0.0:8443"
-  external_url: "https://edge-api.dreamreflex.com"
+  external_url: "https://edge-api.example.com"
 
 database:
   path: "/var/lib/service-edge/data.db"
@@ -23,18 +23,19 @@ frp_release:
   base_url: "https://github.com/fatedier/frp/releases/download"
   default_version: "v0.61.1"
 
-# Base URL the generated install scripts download the agent binary from.
-install_script_base: "https://edge-api.dreamreflex.com/install"
+# Optional install script URL; defaults to server.external_url + /install.
+# install_script_base: "https://edge-api.example.com/install"
 
-# URL agents download the prebuilt agent binary from (per-arch suffix appended).
-agent_download_base: "https://edge-api.dreamreflex.com/download/agent"
+# Optional binary URL; defaults to server.external_url + /download/agent.
+# Per-architecture suffix is appended.
+# agent_download_base: "https://edge-api.example.com/download/agent"
 
 # One-time enrollment token TTL.
 enrollment_token_ttl: "15m"
 
 cors:
   allowed_origins:
-    - "https://edge.dreamreflex.com"
+    - "https://edge.example.com"
 
 logging:
   level: "info"

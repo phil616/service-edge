@@ -211,3 +211,51 @@ func TestLegacyProxySnapshotRemainsReadable(t *testing.T) {
 		t.Fatal(conn)
 	}
 }
+
+func TestReachableAgentWithStoppedFRPSAndLightweightReport(t *testing.T) {
+	s := newTestService(t)
+	if err := s.Store.DB.Create(&model.FRPSNode{UUID: "node", ConfigVersion: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordStatus("frps", "node", protocol.StatusRequest{ProcessStatusAvailable: true, ProcessAlive: true, SystemInfo: protocol.SystemInfo{OS: "linux"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordStatus("frps", "node", protocol.StatusRequest{ProcessStatusAvailable: true, ProcessAlive: false, ConnectionsOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	node, err := s.GetFRPS("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Status != "online" || node.Runtime.ProcessAlive == nil || *node.Runtime.ProcessAlive || node.Runtime.OS != "linux" {
+		t.Fatalf("liveness and process conflated: %+v", node)
+	}
+	if err := s.RecordStatus("frps", "node", protocol.StatusRequest{ConnectionsOnly: true, StatusError: "systemctl timed out"}); err != nil {
+		t.Fatal(err)
+	}
+	node, err = s.GetFRPS("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Runtime.ProcessAlive != nil || node.Runtime.ProcessError == "" {
+		t.Fatal("observation failure must be unknown")
+	}
+}
+
+func TestFRPSProcessObservationExpiresDespiteHeartbeat(t *testing.T) {
+	s := newTestService(t)
+	alive := true
+	old := time.Now().Add(-time.Minute)
+	if err := s.Store.DB.Create(&model.FRPSNode{UUID: "node", Status: "online", LastHeartbeat: timePointer(time.Now()), Runtime: model.AgentRuntime{ProcessAlive: &alive, ProcessReportedAt: &old}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	s.ReapStaleAgents()
+	node, err := s.GetFRPS("node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.Status != "online" || node.Runtime.ProcessAlive != nil || node.Runtime.ProcessError == "" {
+		t.Fatalf("stale process observation remains current: %+v", node)
+	}
+}
+func timePointer(v time.Time) *time.Time { return &v }

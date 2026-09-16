@@ -50,14 +50,33 @@ func (s Systemd) ReloadOrRestart(unit string) (restarted bool, err error) {
 	return true, s.Restart(unit)
 }
 
-// WaitActive polls is-active for up to timeout, returning true once active.
+// WaitActive requires a stable running PID for one second. A transient active
+// state followed by a crash must not count as an applied configuration.
 func (s Systemd) WaitActive(unit string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if s.IsActive(unit) {
-			return true
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	var stableSince time.Time
+	var previousPID int
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		active, pid, err := s.ProcessStatus(ctx, unit)
+		if err == nil && active && pid > 0 {
+			if stableSince.IsZero() || previousPID != pid {
+				stableSince = time.Now()
+			}
+			previousPID = pid
+			if time.Since(stableSince) >= time.Second {
+				return true
+			}
+		} else {
+			stableSince = time.Time{}
+			previousPID = 0
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
 	}
-	return s.IsActive(unit)
 }

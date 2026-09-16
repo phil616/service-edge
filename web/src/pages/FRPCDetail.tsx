@@ -71,7 +71,7 @@ export default function FRPCDetail() {
         >
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="UUID"><span className="mono">{data?.uuid}</span></Descriptions.Item>
-            <Descriptions.Item label="状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
+            <Descriptions.Item label="Agent 状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
             <Descriptions.Item label="目标 FRP 版本"><Tag>{data?.frp_version}</Tag></Descriptions.Item>
             <Descriptions.Item label="目标 / 已应用配置">{data?.config_version} / {data?.runtime?.applied_config_version || '未确认'}</Descriptions.Item>
             {data?.runtime?.last_apply_error && <Descriptions.Item label="配置应用错误">{data.runtime.last_apply_error}</Descriptions.Item>}

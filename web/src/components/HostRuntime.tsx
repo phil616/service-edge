@@ -15,7 +15,14 @@ export default function HostRuntime({ runtime }: { runtime?: AgentRuntime }) {
       <Descriptions.Item label="内核版本"><span className="mono">{runtime.kernel || '-'}</span></Descriptions.Item>
       <Descriptions.Item label="总内存">{formatMemoryMB(runtime.memory_mb)}</Descriptions.Item>
       <Descriptions.Item label="运行时长">{formatUptime(runtime.uptime_sec)}</Descriptions.Item>
-      <Descriptions.Item label="磁盘 FRP 版本">{runtime.binary_version || '未采集'}</Descriptions.Item>
+      <Descriptions.Item label="已应用 FRP 版本">{runtime.binary_version || '未采集'}</Descriptions.Item>
+      <Descriptions.Item label="frp 进程状态">
+        <Tag color={runtime.process_alive == null ? 'default' : runtime.process_alive ? 'green' : 'red'}>
+          {runtime.process_alive == null ? '未采集 / 请查看各连接' : runtime.process_alive ? '运行中' : '未运行'}
+        </Tag>
+        {runtime.process_error}
+        {runtime.process_reported_at && <span>（{dayjs(runtime.process_reported_at).format('HH:mm:ss')}）</span>}
+      </Descriptions.Item>
       <Descriptions.Item label="frp 进程 PID">{runtime.process_pid || '-'}</Descriptions.Item>
       <Descriptions.Item label="活动连接数">{runtime.active_connections ?? '未采集'}</Descriptions.Item>
       <Descriptions.Item label="frp 最近错误">

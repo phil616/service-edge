@@ -6,7 +6,10 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -51,15 +54,34 @@ func LoadConfig(path string) (*Config, error) {
 	if c.StatusReportInterval == 0 {
 		c.StatusReportInterval = config.Duration(180 * time.Second)
 	}
-	if c.ConfigPollTimeout == 0 {
-		c.ConfigPollTimeout = config.Duration(35 * time.Second)
-	}
+
 	if c.HeartbeatInterval < 0 || c.StatusReportInterval < 0 {
 		return nil, fmt.Errorf("report intervals must be positive")
 	}
-	if c.ConfigPollTimeout.Std() <= 30*time.Second {
-		return nil, fmt.Errorf("config_poll_timeout must exceed the server's 30s long-poll window")
+	if c.ConfigPollTimeout < 0 {
+		return nil, fmt.Errorf("config_poll_timeout must not be negative")
 	}
+	if c.ConfigPollTimeout.Std() <= 30*time.Second {
+		if c.ConfigPollTimeout != 0 {
+			slog.Warn("upgrading legacy config_poll_timeout to 60s")
+		}
+		c.ConfigPollTimeout = config.Duration(60 * time.Second)
+	}
+	c.APIEndpoint = strings.TrimRight(strings.TrimSpace(c.APIEndpoint), "/")
+	u, err := url.Parse(c.APIEndpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return nil, fmt.Errorf("api_endpoint must be an HTTP(S) base URL without credentials, query or fragment")
+	}
+	if strings.HasSuffix(u.Path, "/api/v1") {
+		return nil, fmt.Errorf("api_endpoint must not include /api/v1")
+	}
+	if c.FrpBinaryPath == "" {
+		c.FrpBinaryPath = frp.FRPSBaseDir + "/bin/frps"
+		if c.AgentType == "frpc" {
+			c.FrpBinaryPath = frp.FRPCBaseDir + "/bin/frpc"
+		}
+	}
+
 	return &c, nil
 }
 

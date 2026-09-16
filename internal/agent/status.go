@@ -6,16 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dreamreflex/service-edge/internal/frp"
 	"github.com/dreamreflex/service-edge/internal/protocol"
 )
 
 const connectionReportInterval = 10 * time.Second
 
 func (r *Runner) connectionStatusLoop(ctx context.Context) {
-	if r.cfg.AgentType != "frpc" {
-		return
-	}
 	ticker := time.NewTicker(connectionReportInterval)
 	defer ticker.Stop()
 	for {
@@ -23,7 +19,11 @@ func (r *Runner) connectionStatusLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.reportConnections(ctx, true)
+			if r.cfg.AgentType == "frpc" {
+				r.reportConnections(ctx, true)
+			} else {
+				r.reportFRPSStatus(ctx, true)
+			}
 		}
 	}
 }
@@ -46,7 +46,6 @@ func (r *Runner) reportConnections(ctx context.Context, connectionsOnly bool) {
 		ConnectionsOnly: connectionsOnly, ConnectionReportIntervalSeconds: int(connectionReportInterval / time.Second),
 	}
 	if !connectionsOnly {
-		req.FrpVersion = frp.FrpVersion(r.cfg.FrpBinaryPath)
 		req.SystemInfo = collectSystemInfo()
 		req.ListeningPorts = collectListeningPorts()
 	}
@@ -80,18 +79,18 @@ func (r *Runner) collectConnections(ctx context.Context) []protocol.ConnectionSt
 		go func() {
 			defer wg.Done()
 			for j := range jobs {
-				cs := protocol.ConnectionStatus{UUID: j.uuid, ConfigVersion: j.state.Version}
+				cs := protocol.ConnectionStatus{UUID: j.uuid, ConfigVersion: j.state.Version, StatusError: j.state.LastApplyError, BinaryVersion: j.state.BinaryVersion}
 				cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 				alive, pid, err := r.systemd.ProcessStatus(cctx, frpcUnit(j.uuid))
 				cs.ProcessAlive, cs.ProcessPID = alive, pid
 				if err != nil {
-					cs.StatusError = "process observation: " + err.Error()
+					cs.StatusError += "; process observation: " + err.Error()
 				} else {
 					cs.ProcessStatusAvailable = true
 					if alive {
 						cs.ProxyStatuses, err = r.queryProxyStatusesFor(cctx, j.uuid, j.state.AdminPort)
 						if err != nil {
-							cs.StatusError = "admin observation: " + err.Error()
+							cs.StatusError += "; admin observation: " + err.Error()
 						} else {
 							cs.ProxyStatusAvailable = true
 						}

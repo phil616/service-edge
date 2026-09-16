@@ -6,7 +6,7 @@ import (
 	"github.com/dreamreflex/service-edge/internal/model"
 )
 
-// Supported frpc control transports. tcp / websocket / wss multiplex over the
+// Direct frpc control transports. tcp / websocket multiplex over the
 // frps TCP bind_port; kcp / quic each need a dedicated UDP port enabled on frps.
 const (
 	ProtoTCP       = "tcp"
@@ -33,10 +33,10 @@ func normalizeProtocol(p string) (string, error) {
 }
 
 // nodeOffersProtocol reports whether the node exposes the given transport.
-// tcp/websocket/wss always ride bind_port; kcp/quic need their UDP port enabled.
+// tcp/websocket ride bind_port; WSS requires a separately configured TLS gateway.
 func nodeOffersProtocol(node model.FRPSNode, protocol string) bool {
 	switch protocol {
-	case ProtoTCP, ProtoWebsocket, ProtoWSS:
+	case ProtoTCP, ProtoWebsocket:
 		return true
 	case ProtoKCP:
 		return node.KCPBindPort != nil
@@ -52,6 +52,9 @@ func validateClientProtocol(node model.FRPSNode, protocol string) (string, error
 	p, err := normalizeProtocol(protocol)
 	if err != nil {
 		return "", err
+	}
+	if p == ProtoWSS {
+		return "", fmt.Errorf("%w: 当前直连架构不支持 WSS；需要独立 TLS WebSocket 网关，请改用 TCP 或 WebSocket（均启用双向 TLS）", ErrConflict)
 	}
 	if !nodeOffersProtocol(node, p) {
 		return "", fmt.Errorf("%w: 目标节点未启用 %s 传输，请先在节点上启用对应端口", ErrConflict, p)
@@ -94,6 +97,17 @@ func nodeReservedPorts(node model.FRPSNode) map[int]bool {
 // validateNodeTransportPorts checks kcp/quic port choices for a node. QUIC must
 // not share the TCP bind_port; neither may collide with the dashboard port.
 func validateNodeTransportPorts(bindPort int, dashboardPort, kcp, quic *int) error {
+	if bindPort < 1 || bindPort > 65535 {
+		return fmt.Errorf("%w: bind_port must be in 1..65535", ErrConflict)
+	}
+	for _, port := range []*int{dashboardPort, kcp, quic} {
+		if port != nil && (*port < 1 || *port > 65535) {
+			return fmt.Errorf("%w: port must be in 1..65535", ErrConflict)
+		}
+	}
+	if dashboardPort != nil && *dashboardPort == bindPort {
+		return fmt.Errorf("%w: dashboard port conflicts with bind_port", ErrConflict)
+	}
 	if quic != nil && *quic == bindPort {
 		return fmt.Errorf("%w: QUIC 端口不能与服务端口 (%d) 相同", ErrConflict, bindPort)
 	}

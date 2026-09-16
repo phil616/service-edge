@@ -23,7 +23,7 @@ export default function FRPCList() {
     { title: '主机名称', dataIndex: 'name', render: (v: string, r: FRPCHost) => <a onClick={() => navigate(`/frpc/${r.uuid}`)}>{v}</a> },
     { title: 'UUID', dataIndex: 'uuid', render: (v: string) => <span className="mono">{v.slice(0, 8)}</span> },
     { title: '连接数', render: (_: unknown, r: FRPCHost) => <Tag color="blue">{r.connections?.length ?? 0}</Tag> },
-    { title: '状态', dataIndex: 'status', render: (v: string) => <StatusBadge status={v} /> },
+    { title: 'Agent 状态', dataIndex: 'status', render: (v: string) => <StatusBadge status={v} /> },
     { title: 'frp 版本', dataIndex: 'frp_version', render: (v: string) => <Tag>{v || '-'}</Tag> },
     {
       title: '最后心跳',
