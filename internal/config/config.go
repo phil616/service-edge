@@ -102,9 +102,6 @@ func (c *Config) applyDefaults() {
 	if c.Server.Listen == "" {
 		c.Server.Listen = "0.0.0.0:8443"
 	}
-	if c.FrpRelease.BaseURL == "" {
-		c.FrpRelease.BaseURL = "https://github.com/fatedier/frp/releases/download"
-	}
 	if c.FrpRelease.DefaultVersion == "" {
 		c.FrpRelease.DefaultVersion = "v0.61.1"
 	}
@@ -132,7 +129,7 @@ func (c *Config) validate() error {
 	if c.PKI.CACert == "" || c.PKI.CAKey == "" {
 		return fmt.Errorf("pki.ca_cert and pki.ca_key must be set")
 	}
-	for name, value := range map[string]string{"server.external_url": c.Server.ExternalURL, "install_script_base": c.InstallScriptBase, "agent_download_base": c.AgentDownloadBase, "frp_release.base_url": c.FrpRelease.BaseURL} {
+	for name, value := range map[string]string{"server.external_url": c.Server.ExternalURL, "install_script_base": c.InstallScriptBase, "agent_download_base": c.AgentDownloadBase} {
 		u, err := url.Parse(value)
 		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 			return fmt.Errorf("%s must be an HTTP(S) base URL", name)

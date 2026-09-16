@@ -170,7 +170,7 @@ fi
 
 # ---------- frp ----------
 echo
-FRP_BASE=$(ask "frp 下载基址 (frp_release.base_url)" "https://github.com/fatedier/frp/releases/download")
+echo "FRP 不会从 GitHub 自动下载；请启动控制面后在管理界面上传对应归档。"
 FRP_VERSION=$(ask "frp 默认版本 (frp_release.default_version)" "v0.61.1")
 
 # ---------- 安装脚本 / agent 下载基址（默认从 external_url 推导）----------
@@ -243,7 +243,6 @@ pki:
   ca_key: $(yq_str "$CA_KEY")
 
 frp_release:
-  base_url: $(yq_str "$FRP_BASE")
   default_version: $(yq_str "$FRP_VERSION")
 
 install_script_base: $(yq_str "$INSTALL_BASE")

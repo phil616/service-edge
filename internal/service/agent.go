@@ -131,9 +131,13 @@ func (s *Service) BuildConfigResponse(agentType, uuid, osName, arch string) (*pr
 		if err != nil {
 			return nil, err
 		}
+		binary, err := s.frpBinary(node.FrpVersion, osName, arch)
+		if err != nil {
+			return nil, err
+		}
 		return &protocol.ConfigResponse{
 			ConfigVersion: node.ConfigVersion,
-			FrpBinary:     s.frpBinary(node.FrpVersion, osName, arch),
+			FrpBinary:     binary,
 			FrpConfig:     RenderFRPSConfig(node),
 			TLSCert:       node.TLSCert,
 			TLSKey:        node.TLSKey,
@@ -170,9 +174,13 @@ func (s *Service) buildHostConfigSnapshot(hostUUID, osName, arch string) (*proto
 	if err != nil {
 		return nil, err
 	}
+	binary, err := s.frpBinary(host.FrpVersion, osName, arch)
+	if err != nil {
+		return nil, err
+	}
 	resp := &protocol.HostConfigResponse{
 		ConfigVersion: host.ConfigVersion,
-		FrpBinary:     s.frpBinary(host.FrpVersion, osName, arch),
+		FrpBinary:     binary,
 		CACert:        s.CA.CertPEM(),
 	}
 	for i := range host.Connections {
@@ -212,21 +220,18 @@ func normalizeFrpVersion(version string) string {
 	return version
 }
 
-// frpBinary builds the release download descriptor for a version/os/arch. If a
-// matching release tarball has been uploaded to the control plane, the agent is
-// pointed at the local dist endpoint instead of GitHub — so binary installs
-// triggered after enrollment (version change, missing binary) also work when the
-// host can't reach GitHub. Falls back to the configured GitHub base otherwise.
-func (s *Service) frpBinary(version, osName, arch string) protocol.FrpBinary {
+// frpBinary builds the release descriptor from an archive uploaded by an
+// administrator. The control plane never asks agents to download from GitHub:
+// deployments must be explicit and reproducible in restricted environments.
+func (s *Service) frpBinary(version, osName, arch string) (protocol.FrpBinary, error) {
 	tag := normalizeFrpVersion(version) // always v-prefixed for the URL path
 	v := strings.TrimPrefix(tag, "v")
 	file := fmt.Sprintf("frp_%s_%s_%s.tar.gz", v, osName, arch)
 	if dist := s.localFRPDist(file); dist != nil {
 		url := strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/api/v1/frp-dist/" + file
-		return protocol.FrpBinary{Version: version, DownloadURL: url, SHA256: dist.SHA256}
+		return protocol.FrpBinary{Version: version, DownloadURL: url, SHA256: dist.SHA256}, nil
 	}
-	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), tag, file)
-	return protocol.FrpBinary{Version: version, DownloadURL: url}
+	return protocol.FrpBinary{}, fmt.Errorf("%w: frp %s for %s/%s has not been uploaded; administrator must upload %s", ErrConflict, version, osName, arch, file)
 }
 
 // A database record alone does not prove a persisted archive still exists.

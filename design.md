@@ -120,9 +120,8 @@ pki:
   ca_cert: "/etc/service-edge/ca.crt"
   ca_key:  "/etc/service-edge/ca.key"
 
-# frp 二进制下载地址（模板，{version} 会被替换）
+# frp 二进制必须先由管理员上传；不会从 GitHub 自动下载
 frp_release:
-  base_url: "https://github.com/fatedier/frp/releases/download"
   default_version: "v0.61.1"
 
 # 安装命令的 base URL（生成的脚本会从这里下载）
@@ -616,15 +615,9 @@ esac
 # 3. 创建目录
 mkdir -p $INSTALL_DIR/{bin,config,data,logs}
 
-# 4. 下载 frps 二进制
+# 4. frps 二进制由管理员提前上传到控制面；安装 Agent 后会从控制面获取
 FRP_TARBALL="frp_${FRP_VERSION#v}_linux_${FRP_ARCH}.tar.gz"
-FRP_URL="https://github.com/fatedier/frp/releases/download/${FRP_VERSION}/${FRP_TARBALL}"
-echo "下载 frps: $FRP_URL"
-curl -fSL "$FRP_URL" -o /tmp/frp.tar.gz
-tar -xzf /tmp/frp.tar.gz -C /tmp/
-cp /tmp/frp_*/frps $INSTALL_DIR/bin/frps
-chmod +x $INSTALL_DIR/bin/frps
-rm -rf /tmp/frp.tar.gz /tmp/frp_*
+echo "请先在控制面上传: $FRP_TARBALL"
 
 # 5. 下载 Agent 二进制
 echo "下载 Agent: $AGENT_DOWNLOAD_URL"

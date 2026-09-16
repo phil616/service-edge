@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +59,40 @@ func TestUploadFRPDistRejectsHTML(t *testing.T) {
 	svc.Cfg.FRPDistDir = t.TempDir()
 	if err := svc.UploadFRPDist("frp_0.71.0_linux_amd64.tar.gz", bytes.NewReader([]byte("<!doctype html>"))); err == nil {
 		t.Fatal("HTML upload accepted")
+	}
+}
+
+func TestFRPBinaryRequiresUploadedArchive(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cfg = &config.Config{}
+	svc.Cfg.Server.ExternalURL = "https://edge.example.com"
+	svc.Cfg.FRPDistDir = t.TempDir()
+
+	got, err := svc.frpBinary("v0.71.0", "linux", "amd64")
+	if err == nil || !errors.Is(err, ErrConflict) || !strings.Contains(err.Error(), "administrator must upload") {
+		t.Fatalf("frpBinary() error = %v, want actionable missing-upload conflict", err)
+	}
+	if got.DownloadURL != "" {
+		t.Fatalf("frpBinary() returned download URL for missing archive: %q", got.DownloadURL)
+	}
+}
+
+func TestFRPBinaryUsesUploadedArchiveOnly(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cfg = &config.Config{}
+	svc.Cfg.Server.ExternalURL = "https://edge.example.com/"
+	svc.Cfg.FRPDistDir = filepath.Join(t.TempDir(), "dist")
+	if err := svc.UploadFRPDist("frp_0.71.0_linux_amd64.tar.gz", bytes.NewReader(validFRPArchive(t))); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.frpBinary("0.71.0", "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://edge.example.com/api/v1/frp-dist/frp_0.71.0_linux_amd64.tar.gz"
+	if got.DownloadURL != want || got.SHA256 == "" {
+		t.Fatalf("frpBinary() = %+v, want local URL with checksum", got)
 	}
 }
 

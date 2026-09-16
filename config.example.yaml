@@ -18,9 +18,10 @@ pki:
   ca_cert: "/etc/service-edge/ca.crt"
   ca_key: "/etc/service-edge/ca.key"
 
-# frp release download template ({version} is the tag, e.g. v0.61.1)
+# FRP archives must be uploaded by an administrator before agents can enroll or
+# apply a configuration. The old base_url field is retained for compatibility
+# but is never used for automatic downloads.
 frp_release:
-  base_url: "https://github.com/fatedier/frp/releases/download"
   default_version: "v0.61.1"
 
 # Optional install script URL; defaults to server.external_url + /install.
