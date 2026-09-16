@@ -238,6 +238,9 @@ func (s *Service) localFRPDist(filename string) *model.FRPDistFile {
 	if err != nil || !info.Mode().IsRegular() || info.Size() != row.Size || info.Size() == 0 {
 		return nil
 	}
+	if err := frp.ValidateReleaseArchive(filepath.Join(s.Cfg.FRPDistDir, filename), row.OS); err != nil {
+		return nil
+	}
 	if row.SHA256 != "" {
 		f, err := os.Open(filepath.Join(s.Cfg.FRPDistDir, filename))
 		if err != nil {
