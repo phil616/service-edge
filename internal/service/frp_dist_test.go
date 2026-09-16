@@ -1,11 +1,64 @@
 package service
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/dreamreflex/service-edge/internal/config"
 	"github.com/dreamreflex/service-edge/internal/model"
 )
+
+func validFRPArchive(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+	tw := tar.NewWriter(gz)
+	for _, name := range []string{"frpc", "frps"} {
+		body := []byte("#!/bin/sh\n")
+		if err := tw.WriteHeader(&tar.Header{Name: "frp_0.71.0_linux_amd64/" + name, Mode: 0755, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestUploadFRPDistValidatesArchiveAndPublishesMetadata(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cfg = &config.Config{}
+	svc.Cfg.FRPDistDir = filepath.Join(t.TempDir(), "dist")
+	if err := svc.UploadFRPDist("frp_0.71.0_linux_amd64.tar.gz", bytes.NewReader(validFRPArchive(t))); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := svc.ListFRPDists()
+	if err != nil || len(rows) != 1 || rows[0].SHA256 == "" {
+		t.Fatalf("metadata missing: %+v %v", rows, err)
+	}
+	if got := svc.localFRPDist(rows[0].Filename); got == nil {
+		t.Fatal("uploaded archive was not usable")
+	}
+}
+
+func TestUploadFRPDistRejectsHTML(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cfg = &config.Config{}
+	svc.Cfg.FRPDistDir = t.TempDir()
+	if err := svc.UploadFRPDist("frp_0.71.0_linux_amd64.tar.gz", bytes.NewReader([]byte("<!doctype html>"))); err == nil {
+		t.Fatal("HTML upload accepted")
+	}
+}
 
 func TestCompareFrpVersion(t *testing.T) {
 	cases := []struct {

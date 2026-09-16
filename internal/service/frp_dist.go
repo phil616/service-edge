@@ -1,7 +1,11 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"github.com/dreamreflex/service-edge/internal/frp"
+	"gorm.io/gorm/clause"
 	"io"
 	"os"
 	"path/filepath"
@@ -124,12 +128,14 @@ func (s *Service) UploadFRPDist(filename string, r io.Reader) error {
 	}
 
 	dst := filepath.Join(s.Cfg.FRPDistDir, filename)
-	tmp := dst + ".upload"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	f, err := os.CreateTemp(s.Cfg.FRPDistDir, ".frp-upload-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	n, copyErr := io.Copy(f, r)
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	hash := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(f, hash), r)
 	closeErr := f.Close()
 	if copyErr != nil {
 		os.Remove(tmp)
@@ -139,6 +145,12 @@ func (s *Service) UploadFRPDist(filename string, r io.Reader) error {
 		os.Remove(tmp)
 		return fmt.Errorf("close file: %w", closeErr)
 	}
+	if err := frp.ValidateReleaseArchive(tmp, osName); err != nil {
+		return fmt.Errorf("%w: %v", ErrConflict, err)
+	}
+	if err := os.Chmod(tmp, 0644); err != nil {
+		return err
+	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("install file: %w", err)
@@ -146,15 +158,16 @@ func (s *Service) UploadFRPDist(filename string, r io.Reader) error {
 
 	row := model.FRPDistFile{
 		Filename:  filename,
+		SHA256:    hex.EncodeToString(hash.Sum(nil)),
 		Version:   version,
 		OS:        osName,
 		Arch:      arch,
 		Size:      n,
 		CreatedAt: time.Now(),
 	}
-	// Delete existing record (if any) then insert fresh so CreatedAt reflects upload time.
-	s.Store.DB.Where("filename = ?", filename).Delete(&model.FRPDistFile{})
-	return s.Store.DB.Create(&row).Error
+	// Update metadata in one statement rather than deleting it before insertion.
+	return s.Store.DB.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "filename"}}, DoUpdates: clause.AssignmentColumns([]string{"version", "os", "arch", "size", "sha256", "created_at"})}).Create(&row).Error
+
 }
 
 // DeleteFRPDist removes the file from disk and its metadata row.

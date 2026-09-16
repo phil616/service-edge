@@ -75,6 +75,7 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		var err error
 		binary, err = frp.PrepareBinary(ctx, r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256)
 		if err != nil {
+			slog.Error("prepare frp binary failed", "version", bundle.FrpBinary.Version, "err", err)
 			for _, conn := range bundle.Connections {
 				if persistErr := r.state.SetConnFailure(conn.UUID, conn.AdminPort, "prepare binary: "+err.Error()); persistErr != nil {
 					slog.Error("persist connection failure", "uuid", conn.UUID, "error", persistErr)

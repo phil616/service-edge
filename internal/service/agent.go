@@ -1,10 +1,15 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -215,20 +220,37 @@ func (s *Service) frpBinary(version, osName, arch string) protocol.FrpBinary {
 	tag := normalizeFrpVersion(version) // always v-prefixed for the URL path
 	v := strings.TrimPrefix(tag, "v")
 	file := fmt.Sprintf("frp_%s_%s_%s.tar.gz", v, osName, arch)
-	if s.hasFRPDist(file) {
-		url := strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/frp-dist/" + file
-		return protocol.FrpBinary{Version: version, DownloadURL: url}
+	if dist := s.localFRPDist(file); dist != nil {
+		url := strings.TrimRight(s.Cfg.Server.ExternalURL, "/") + "/api/v1/frp-dist/" + file
+		return protocol.FrpBinary{Version: version, DownloadURL: url, SHA256: dist.SHA256}
 	}
 	url := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.Cfg.FrpRelease.BaseURL, "/"), tag, file)
 	return protocol.FrpBinary{Version: version, DownloadURL: url}
 }
 
-// hasFRPDist reports whether a release tarball with the exact filename has been
-// uploaded (and is therefore served by the local /frp-dist endpoint).
-func (s *Service) hasFRPDist(filename string) bool {
-	var count int64
-	s.Store.DB.Model(&model.FRPDistFile{}).Where("filename = ?", filename).Count(&count)
-	return count > 0
+// A database record alone does not prove a persisted archive still exists.
+func (s *Service) localFRPDist(filename string) *model.FRPDistFile {
+	var row model.FRPDistFile
+	if s.Store.DB.Where("filename = ?", filename).First(&row).Error != nil {
+		return nil
+	}
+	info, err := os.Stat(filepath.Join(s.Cfg.FRPDistDir, filename))
+	if err != nil || !info.Mode().IsRegular() || info.Size() != row.Size || info.Size() == 0 {
+		return nil
+	}
+	if row.SHA256 != "" {
+		f, err := os.Open(filepath.Join(s.Cfg.FRPDistDir, filename))
+		if err != nil {
+			return nil
+		}
+		h := sha256.New()
+		_, copyErr := io.Copy(h, f)
+		closeErr := f.Close()
+		if copyErr != nil || closeErr != nil || !strings.EqualFold(hex.EncodeToString(h.Sum(nil)), row.SHA256) {
+			return nil
+		}
+	}
+	return &row
 }
 
 // NoteFRPSPublicIP auto-fills an frps node's public IP from the source address
@@ -294,6 +316,9 @@ func (s *Service) RecordStatus(agentType, uuid string, req protocol.StatusReques
 			updates["rt_process_alive"] = nil
 			if req.ProcessStatusAvailable {
 				updates["rt_process_alive"] = req.ProcessAlive
+			}
+			if req.FrpVersion != "" && req.FrpVersion != "unknown" {
+				updates["rt_binary_version"] = normalizeFrpVersion(req.FrpVersion)
 			}
 			if !req.ConnectionsOnly {
 				updates["rt_active_conns"] = req.FRPStatus.ActiveConnections

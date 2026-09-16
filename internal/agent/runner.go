@@ -217,6 +217,7 @@ func (r *Runner) applyBundle(ctx context.Context, bundle *protocol.ConfigRespons
 
 	binary, err := frp.PrepareBinary(ctx, r.cfg.FrpBinaryPath, bundle.FrpBinary.DownloadURL, bundle.FrpBinary.Version, bundle.FrpBinary.SHA256)
 	if err != nil {
+		slog.Error("prepare frp binary failed", "version", bundle.FrpBinary.Version, "err", err)
 		r.ack(ctx, bundle.ConfigVersion, false, "prepare binary: "+err.Error())
 		return false
 	}

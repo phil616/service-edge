@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,5 +60,17 @@ func TestPrepareBinaryCancellation(t *testing.T) {
 	}
 	if time.Since(start) > time.Second {
 		t.Fatal("download ignored cancellation")
+	}
+}
+
+func TestDownloadRejectsHTMLInsteadOfArchive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<!doctype html><html>SPA fallback</html>"))
+	}))
+	defer server.Close()
+	_, err := PrepareBinary(context.Background(), filepath.Join(t.TempDir(), "frpc"), server.URL, "v2.0.0", "")
+	if err == nil || !strings.Contains(err.Error(), "expected gzip FRP archive") {
+		t.Fatalf("HTML response was not diagnosed as an archive error: %v", err)
 	}
 }

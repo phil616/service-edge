@@ -43,6 +43,8 @@ func NewRouter(o Options) *gin.Engine {
 	// FRP release tarball downloads (public; agents fetch during install).
 	if o.FRPDistDir != "" {
 		r.Static("/frp-dist", o.FRPDistDir)
+		// Keep managed downloads within /api for split frontend/API proxies.
+		r.Static("/api/v1/frp-dist", o.FRPDistDir)
 	}
 
 	api := r.Group("/api/v1")
@@ -126,6 +128,14 @@ func serveSPA(r *gin.Engine, static fs.FS) {
 	index, _ := fs.ReadFile(static, "index.html")
 
 	r.NoRoute(func(c *gin.Context) {
+		// Resource/API misses must never become a successful HTML download.
+		for _, prefix := range []string{"/api", "/install", "/download", "/frp-dist"} {
+			if c.Request.URL.Path == prefix || strings.HasPrefix(c.Request.URL.Path, prefix+"/") {
+				c.Header("Cache-Control", "no-store")
+				c.JSON(http.StatusNotFound, gin.H{"error": "endpoint or download not found"})
+				return
+			}
+		}
 		p := strings.TrimPrefix(c.Request.URL.Path, "/")
 		if p == "" {
 			c.Data(http.StatusOK, "text/html; charset=utf-8", index)

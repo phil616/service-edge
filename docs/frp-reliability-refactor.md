@@ -30,7 +30,7 @@ frp 字段含义依据 [v0.61.1 官方客户端配置源代码](https://github.c
 | Agent 控制平面地址 | `server.external_url`，必须是 Agent 可访问的 HTTP(S) 根地址，不附加 `/api/v1` |
 | 安装脚本 | `install_script_base`；省略时为 `external_url + /install` |
 | Agent 二进制 | `agent_download_base`；省略时为 `external_url + /download/agent`；系统设置可按角色覆盖 |
-| frp 二进制 | 优先已上传的 `/frp-dist/` 资源，否则使用 `frp_release.base_url` |
+| frp 二进制 | 优先已上传的 `/api/v1/frp-dist/` 资源，否则使用 `frp_release.base_url`；该资源必须返回原始 `.tar.gz`，不能被 SPA fallback 替换成 HTML |
 | frpc 连接目标 | 节点 `public_ip`，可填写 IP 或域名；这是数据面地址，与 API 地址独立 |
 | 浏览器 API | 前端构建的 API 配置；跨域部署时同步配置后端 CORS |
 

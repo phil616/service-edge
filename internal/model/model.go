@@ -171,6 +171,7 @@ type Setting struct {
 // The file is stored on disk under FRPDistDir; the download endpoint serves it publicly
 // so agents can fetch it without hitting GitHub.
 type FRPDistFile struct {
+	SHA256    string    `json:"sha256,omitempty"`
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	Filename  string    `gorm:"column:filename;uniqueIndex;not null" json:"filename"`
 	Version   string    `gorm:"column:version;not null;index" json:"version"`

@@ -2,6 +2,7 @@ package frp
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -78,7 +79,7 @@ func ensureBinary(ctx context.Context, binaryPath, downloadURL, wantVersion, wan
 	defer os.RemoveAll(stage)
 	candidate := filepath.Join(stage, wantBin)
 	if err := extractBinary(tmpPath, wantBin, candidate); err != nil {
-		return err
+		return fmt.Errorf("extract FRP archive from %s: %w", downloadURL, err)
 	}
 	if !currentMatches(candidate, wantVersion) {
 		return fmt.Errorf("downloaded frp executable has wrong version or cannot run")
@@ -111,6 +112,8 @@ func downloadContext(ctx context.Context, url string, dst io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Preserve the archive bytes even when an origin labels the file Content-Encoding: gzip.
+	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", url, err)
@@ -119,7 +122,12 @@ func downloadContext(ctx context.Context, url string, dst io.Writer) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s: status %d", url, resp.StatusCode)
 	}
-	if _, err := io.Copy(dst, resp.Body); err != nil {
+	reader := bufio.NewReader(resp.Body)
+	header, err := reader.Peek(3)
+	if err != nil || len(header) != 3 || header[0] != 0x1f || header[1] != 0x8b || header[2] != 8 {
+		return fmt.Errorf("download %s: expected gzip FRP archive, received status=%d content-type=%q size=%d; check download routing, SPA fallback or uploaded file", resp.Request.URL.Redacted(), resp.StatusCode, resp.Header.Get("Content-Type"), resp.ContentLength)
+	}
+	if _, err := io.Copy(dst, reader); err != nil {
 		return fmt.Errorf("write tarball: %w", err)
 	}
 	return nil

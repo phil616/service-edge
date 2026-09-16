@@ -11,7 +11,8 @@ import (
 	"github.com/dreamreflex/service-edge/internal/protocol"
 )
 
-const longPollTimeout = 30 * time.Second
+// Leave headroom for common 30s reverse-proxy response deadlines.
+const longPollTimeout = 15 * time.Second
 
 func (h *Handler) AgentHeartbeat(c *gin.Context) {
 	var req protocol.HeartbeatRequest
@@ -50,9 +51,10 @@ func (h *Handler) AgentStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// AgentConfig is the long-poll endpoint. It hangs up to 30s waiting for a config
+// AgentConfig is the long-poll endpoint. It hangs up to 15s waiting for a config
 // newer than current_version; returns 200 + bundle on update, 304 on timeout.
 func (h *Handler) AgentConfig(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	uuid := middleware.AgentUUID(c)
 	atype := middleware.AgentType(c)
 	osName := c.Query("os")
