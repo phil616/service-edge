@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/dreamreflex/service-edge/internal/frp"
 	"github.com/dreamreflex/service-edge/internal/model"
 	"github.com/dreamreflex/service-edge/internal/pki"
 	"github.com/dreamreflex/service-edge/internal/protocol"
