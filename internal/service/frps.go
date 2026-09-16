@@ -14,6 +14,10 @@ import (
 
 // CreateFRPSInput is the payload for creating an frps node.
 type CreateFRPSInput struct {
+	VhostHTTPPort  int    `json:"vhost_http_port"`
+	VhostHTTPSPort int    `json:"vhost_https_port"`
+	SubdomainHost  string `json:"subdomain_host"`
+
 	Name          string `json:"name" binding:"required"`
 	BindPort      int    `json:"bind_port" binding:"required"`
 	DashboardPort *int   `json:"dashboard_port"`
@@ -27,6 +31,10 @@ type CreateFRPSInput struct {
 
 // UpdateFRPSInput is the payload for updating an frps node.
 type UpdateFRPSInput struct {
+	VhostHTTPPort  *int    `json:"vhost_http_port"`
+	VhostHTTPSPort *int    `json:"vhost_https_port"`
+	SubdomainHost  *string `json:"subdomain_host"`
+
 	Name          *string `json:"name"`
 	BindPort      *int    `json:"bind_port"`
 	DashboardPort *int    `json:"dashboard_port"`
@@ -82,6 +90,9 @@ func (s *Service) GetFRPS(uuid string) (*model.FRPSNode, error) {
 }
 
 func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
+	if err := validateServerAddress(in.PublicIP); err != nil {
+		return nil, err
+	}
 	if err := validateNodeTransportPorts(in.BindPort, in.DashboardPort, in.KCPBindPort, in.QUICBindPort); err != nil {
 		return nil, err
 	}
@@ -102,21 +113,27 @@ func (s *Service) CreateFRPS(in CreateFRPSInput) (*model.FRPSNode, error) {
 	}
 
 	node := &model.FRPSNode{
-		UUID:          uuid,
-		Name:          in.Name,
-		BindPort:      in.BindPort,
-		DashboardPort: in.DashboardPort,
-		DashboardUser: in.DashboardUser,
-		DashboardPwd:  in.DashboardPwd,
-		KCPBindPort:   in.KCPBindPort,
-		QUICBindPort:  in.QUICBindPort,
-		FrpToken:      util.RandomToken(32), // 64 hex chars
-		TLSCert:       cert.CertPEM,
-		TLSKey:        cert.KeyPEM,
-		FrpVersion:    version,
-		ConfigVersion: 1,
-		Status:        "pending",
-		PublicIP:      in.PublicIP,
+		UUID:           uuid,
+		VhostHTTPPort:  in.VhostHTTPPort,
+		VhostHTTPSPort: in.VhostHTTPSPort,
+		SubdomainHost:  in.SubdomainHost,
+		Name:           in.Name,
+		BindPort:       in.BindPort,
+		DashboardPort:  in.DashboardPort,
+		DashboardUser:  in.DashboardUser,
+		DashboardPwd:   in.DashboardPwd,
+		KCPBindPort:    in.KCPBindPort,
+		QUICBindPort:   in.QUICBindPort,
+		FrpToken:       util.RandomToken(32), // 64 hex chars
+		TLSCert:        cert.CertPEM,
+		TLSKey:         cert.KeyPEM,
+		FrpVersion:     version,
+		ConfigVersion:  1,
+		Status:         "pending",
+		PublicIP:       in.PublicIP,
+	}
+	if err := validateVhostPorts(*node); err != nil {
+		return nil, err
 	}
 	if err := s.Store.DB.Create(node).Error; err != nil {
 		return nil, err
@@ -134,6 +151,15 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 				return ErrNotFound
 			}
 			return err
+		}
+		if in.VhostHTTPPort != nil {
+			n.VhostHTTPPort = *in.VhostHTTPPort
+		}
+		if in.VhostHTTPSPort != nil {
+			n.VhostHTTPSPort = *in.VhostHTTPSPort
+		}
+		if in.SubdomainHost != nil {
+			n.SubdomainHost = *in.SubdomainHost
 		}
 		if in.Name != nil {
 			n.Name = *in.Name
@@ -154,6 +180,9 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 			n.FrpVersion = *in.FrpVersion
 		}
 		if in.PublicIP != nil {
+			if err := validateServerAddress(*in.PublicIP); err != nil {
+				return err
+			}
 			n.PublicIP = *in.PublicIP
 		}
 		if in.KCPBindPort.Set {
@@ -163,6 +192,9 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 			n.QUICBindPort = in.QUICBindPort.Value
 		}
 		if err := validateNodeTransportPorts(n.BindPort, n.DashboardPort, n.KCPBindPort, n.QUICBindPort); err != nil {
+			return err
+		}
+		if err := validateVhostPorts(n); err != nil {
 			return err
 		}
 		n.ConfigVersion++
@@ -187,13 +219,16 @@ func (s *Service) UpdateFRPS(uuid string, in UpdateFRPSInput) (*model.FRPSNode, 
 }
 
 func (s *Service) DeleteFRPS(uuid string) error {
-	return s.Store.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		var count int64
 		if err := tx.Model(&model.FRPCConnection{}).Where("frps_uuid = ?", uuid).Count(&count).Error; err != nil {
 			return err
 		}
 		if count > 0 {
 			return fmt.Errorf("%w: 仍有 %d 个 frpc 连接指向该节点", ErrConflict, count)
+		}
+		if err := retireAgentTx(tx, "frps", uuid); err != nil {
+			return err
 		}
 		res := tx.Where("uuid = ?", uuid).Delete(&model.FRPSNode{})
 		if res.Error != nil {
@@ -204,6 +239,10 @@ func (s *Service) DeleteFRPS(uuid string) error {
 		}
 		return nil
 	})
+	if err == nil {
+		s.Notifier.Publish(uuid)
+	}
+	return err
 }
 
 // UsedRemotePorts returns the set of remote_port values already taken on the

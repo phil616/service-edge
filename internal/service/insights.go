@@ -70,6 +70,12 @@ func (s *Service) PortUsage(frpsUUID string) ([]PortUse, error) {
 		return nil, err
 	}
 	out := []PortUse{{Port: node.BindPort, Kind: "bind"}}
+	if node.VhostHTTPPort > 0 {
+		out = append(out, PortUse{Port: node.VhostHTTPPort, Kind: "http"})
+	}
+	if node.VhostHTTPSPort > 0 {
+		out = append(out, PortUse{Port: node.VhostHTTPSPort, Kind: "https"})
+	}
 	if node.DashboardPort != nil {
 		out = append(out, PortUse{Port: *node.DashboardPort, Kind: "dashboard"})
 	}

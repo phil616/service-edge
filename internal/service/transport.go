@@ -2,6 +2,8 @@ package service
 
 import (
 	"fmt"
+	"net"
+	"strings"
 
 	"github.com/dreamreflex/service-edge/internal/model"
 )
@@ -82,6 +84,12 @@ func serverPortFor(node model.FRPSNode, protocol string) int {
 // remote_port can't collide with the node's own listeners.
 func nodeReservedPorts(node model.FRPSNode) map[int]bool {
 	used := map[int]bool{node.BindPort: true}
+	if node.VhostHTTPPort > 0 {
+		used[node.VhostHTTPPort] = true
+	}
+	if node.VhostHTTPSPort > 0 {
+		used[node.VhostHTTPSPort] = true
+	}
 	if node.DashboardPort != nil {
 		used[*node.DashboardPort] = true
 	}
@@ -120,6 +128,60 @@ func validateNodeTransportPorts(bindPort int, dashboardPort, kcp, quic *int) err
 		}
 		if quic != nil && *quic == *dashboardPort {
 			return fmt.Errorf("%w: QUIC 端口不能与 Dashboard 端口相同", ErrConflict)
+		}
+	}
+	return nil
+}
+
+func validateVhostPorts(node model.FRPSNode) error {
+	used := map[int]bool{node.BindPort: true}
+	for _, p := range []*int{node.DashboardPort, node.KCPBindPort, node.QUICBindPort} {
+		if p != nil {
+			used[*p] = true
+		}
+	}
+	for _, port := range []int{node.VhostHTTPPort, node.VhostHTTPSPort} {
+		if port == 0 {
+			continue
+		}
+		if port < 1 || port > 65535 || used[port] {
+			return fmt.Errorf("%w: HTTP/HTTPS 入口端口必须在 1..65535 且不与节点端口冲突", ErrConflict)
+		}
+		used[port] = true
+	}
+	return nil
+}
+
+func validateProxyListener(p ProxyMappingInput, node model.FRPSNode) error {
+	if p.ProxyType != "http" && p.ProxyType != "https" {
+		return nil
+	}
+	if (p.ProxyType == "http" && node.VhostHTTPPort == 0) || (p.ProxyType == "https" && node.VhostHTTPSPort == 0) {
+		return fmt.Errorf("%w: 请先在 FRPS 节点配置 %s 入口端口", ErrConflict, p.ProxyType)
+	}
+	if p.Subdomain != "" && node.SubdomainHost == "" {
+		return fmt.Errorf("%w: 请先在 FRPS 节点配置 subdomain_host", ErrConflict)
+	}
+	return nil
+}
+
+// A request's source address may be a reverse proxy or NAT gateway, not the
+// public FRPS listener. Routing always uses an explicitly configured address.
+func validateServerAddress(address string) error {
+	if net.ParseIP(address) != nil {
+		return nil
+	}
+	if address == "" || len(address) > 253 || strings.ContainsAny(address, "/: \t\r\n") {
+		return fmt.Errorf("%w: public_ip 必须填写 FRPC 可达的 IP 或域名，不含协议和端口", ErrConflict)
+	}
+	for _, label := range strings.Split(strings.TrimSuffix(address, "."), ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return fmt.Errorf("%w: invalid FRPS hostname", ErrConflict)
+		}
+		for _, ch := range label {
+			if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-') {
+				return fmt.Errorf("%w: invalid FRPS hostname", ErrConflict)
+			}
 		}
 	}
 	return nil

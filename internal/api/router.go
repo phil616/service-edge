@@ -89,6 +89,7 @@ func NewRouter(o Options) *gin.Engine {
 		authed.GET("/ca", o.Handler.CAInfo)
 		authed.GET("/topology", o.Handler.Topology)
 
+		authed.GET("/agent-retirements", o.Handler.ListAgentRetirements)
 		authed.GET("/settings", o.Handler.GetSettings)
 		authed.PUT("/settings", o.Handler.UpdateSettings)
 
@@ -100,13 +101,12 @@ func NewRouter(o Options) *gin.Engine {
 	}
 
 	// Agent API.
-	agentToken := o.Cfg.AgentAPIToken
 	agentGrp := api.Group("/agent")
 	{
-		agentGrp.POST("/enroll", middleware.RequireAgentToken(agentToken), o.Handler.AgentEnroll)
+		agentGrp.POST("/enroll", o.Handler.AgentEnroll)
 
 		authedAgent := agentGrp.Group("")
-		authedAgent.Use(middleware.RequireAgent(agentToken))
+		authedAgent.Use(middleware.RequireAgent(o.Handler.Svc.AuthorizeAgent))
 		authedAgent.POST("/heartbeat", o.Handler.AgentHeartbeat)
 		authedAgent.POST("/status", o.Handler.AgentStatus)
 		authedAgent.GET("/config", o.Handler.AgentConfig)

@@ -49,19 +49,24 @@ func TestHostStartupReconcilesEvenWhenVersionUnchanged(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/agent/config":
-			versions <- r.URL.Query().Get("current_version")
-			json.NewEncoder(w).Encode(protocol.HostConfigResponse{ConfigVersion: 7})
+			select {
+			case versions <- r.URL.Query().Get("current_version"):
+			case <-ctx.Done():
+				return
+			}
+			json.NewEncoder(w).Encode(protocol.HostConfigResponse{ConfigVersion: 7, Connections: []protocol.ConnectionConfig{}})
 		case "/api/v1/agent/config/ack":
 			cancel()
 		}
 	}))
 	defer srv.Close()
+	defer cancel()
 	state := LoadState(filepath.Join(t.TempDir(), "state.json"))
 	if err := state.SaveHost(7); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &Config{AgentType: "frpc", APIEndpoint: srv.URL}
-	runner := &Runner{cfg: cfg, state: state, client: NewClient(cfg), systemd: &fakeProcesses{}}
+	runner := &Runner{instanceBase: t.TempDir(), cfg: cfg, state: state, client: NewClient(cfg), systemd: &fakeProcesses{}}
 	done := make(chan struct{})
 	go func() { runner.configSyncLoop(ctx); close(done) }()
 	select {

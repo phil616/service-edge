@@ -109,13 +109,16 @@ func (s *Service) CreateConnection(hostUUID string, in CreateConnectionInput) (*
 				return fmt.Errorf("%w: duplicate proxy name %q", ErrConflict, pin.Name)
 			}
 			names[pin.Name] = true
+			if err := validateProxyListener(pin, node); err != nil {
+				return err
+			}
 			if err := validateProxy(pin, used); err != nil {
 				return err
 			}
 			row := pin.toModel(uuid)
 			setHostOccupancy(&row, externalPorts(node, used))
-			if pin.RemotePort != nil {
-				used[*pin.RemotePort] = true
+			if row.RemotePort != nil {
+				used[*row.RemotePort] = true
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err

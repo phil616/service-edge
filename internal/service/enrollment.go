@@ -1,7 +1,9 @@
 package service
 
 import (
+	"crypto/hmac"
 	"errors"
+	"github.com/dreamreflex/service-edge/internal/protocol"
 	"time"
 
 	"gorm.io/gorm"
@@ -59,6 +61,16 @@ func (s *Service) ConsumeEnrollment(token, agentUUID, agentType string) (*model.
 		if t.TargetUUID != agentUUID || t.TargetType != agentType {
 			return ErrEnrollmentInvalid
 		}
+		var targets int64
+		if agentType != "frpc" && agentType != "frps" {
+			return ErrEnrollmentInvalid
+		}
+		if err := tx.Model(modelFor(agentType)).Where("uuid = ?", agentUUID).Count(&targets).Error; err != nil {
+			return err
+		}
+		if targets != 1 {
+			return ErrEnrollmentInvalid
+		}
 		// Retrying the same bound enrollment after a lost HTTP response is safe.
 		if t.UsedAt != nil {
 			return nil
@@ -80,4 +92,28 @@ func (s *Service) ConsumeEnrollment(token, agentUUID, agentType string) (*model.
 		return nil, err
 	}
 	return &t, nil
+}
+
+// AuthorizeAgent never accepts the former fleet-wide secret as an agent token.
+func (s *Service) AuthorizeAgent(kind, uuid, token string) (bool, error) {
+	if (kind != "frps" && kind != "frpc") || uuid == "" || !hmac.Equal([]byte(token), []byte(protocol.AgentToken(s.Cfg.AgentAPIToken, kind, uuid))) {
+		return false, nil
+	}
+	var count int64
+	if err := s.Store.DB.Model(&model.EnrollmentToken{}).Where("target_type = ? AND target_uuid = ? AND used_at IS NOT NULL", kind, uuid).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return false, nil
+	}
+	if err := s.Store.DB.Model(modelFor(kind)).Where("uuid = ?", uuid).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	if err := s.Store.DB.Model(&model.AgentRetirement{}).Where("agent_type = ? AND uuid = ?", kind, uuid).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

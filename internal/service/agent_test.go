@@ -1,7 +1,9 @@
 package service
 
 import (
+	"github.com/dreamreflex/service-edge/internal/config"
 	"github.com/dreamreflex/service-edge/internal/model"
+	"github.com/dreamreflex/service-edge/internal/pki"
 	"github.com/dreamreflex/service-edge/internal/protocol"
 	"testing"
 	"time"
@@ -91,9 +93,8 @@ func TestConnectionReportsPreserveHostFactsAndRepresentFailures(t *testing.T) {
 		{"running", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true, ProxyStatuses: []protocol.ProxyStatus{{Name: "ssh", Status: "running"}}}, "online"},
 		{"admin error", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, StatusError: "admin: timeout"}, "unknown"},
 		{"proxy failure", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true, ProxyStatuses: []protocol.ProxyStatus{{Name: "ssh", Status: "start error", Err: "port occupied"}}}, "degraded"},
-		// A lightweight report may race a reconnect and return no proxy rows;
-		// retain the last confirmed connection state until a full snapshot.
-		{"missing proxy", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true}, "degraded"},
+		// Empty admin snapshots during reconnect cannot confirm any proxy.
+		{"missing proxy", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true}, "unknown"},
 		{"process stopped", protocol.ConnectionStatus{ProcessStatusAvailable: true}, "offline"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,3 +262,16 @@ func TestFRPSProcessObservationExpiresDespiteHeartbeat(t *testing.T) {
 	}
 }
 func timePointer(v time.Time) *time.Time { return &v }
+
+func TestEmptyHostCanDrainWithoutFRPArchive(t *testing.T) {
+	s := newTestService(t)
+	s.Cfg = &config.Config{FRPDistDir: t.TempDir()}
+	s.CA = &pki.CA{}
+	if err := s.Store.DB.Create(&model.FRPCHost{UUID: "empty", FrpVersion: "v9.9.9", ConfigVersion: 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := s.BuildHostConfig("empty", "linux", "amd64")
+	if err != nil || bundle.Connections == nil || len(bundle.Connections) != 0 {
+		t.Fatal(bundle, err)
+	}
+}

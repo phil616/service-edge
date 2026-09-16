@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -43,8 +46,9 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 		Status     string `json:"status"`
 		Err        string `json:"err"`
 		RemoteAddr string `json:"remote_addr"`
+		LocalAddr  string `json:"local_addr"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&byType); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&byType); err != nil {
 		return nil, err
 	}
 	var out []protocol.ProxyStatus
@@ -56,8 +60,55 @@ func (r *Runner) queryProxyStatusesFor(ctx context.Context, connUUID string, adm
 				Status:     p.Status,
 				Err:        p.Err,
 				RemoteAddr: p.RemoteAddr,
+				LocalAddr:  p.LocalAddr,
 			})
 		}
 	}
+	probeLocalTargets(ctx, out)
 	return out, nil
+}
+
+// A running FRP proxy only proves registration at frps. Probe the configured
+// local TCP endpoint separately; UDP requires application-specific checks.
+func probeLocalTargets(ctx context.Context, proxies []protocol.ProxyStatus) {
+	jobs := make(chan int, len(proxies))
+	for i := range proxies {
+		jobs <- i
+	}
+	close(jobs)
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				p := &proxies[i]
+				if p.Type == "udp" || p.LocalAddr == "" {
+					continue
+				}
+				if ctx.Err() != nil {
+					p.LocalError = "probe budget exhausted"
+					continue
+				}
+				probeCtx, cancel := context.WithTimeout(ctx, 700*time.Millisecond)
+				conn, err := (&net.Dialer{}).DialContext(probeCtx, "tcp", p.LocalAddr)
+				cancel()
+				if ctx.Err() != nil {
+					if conn != nil {
+						conn.Close()
+					}
+					p.LocalError = "probe budget exhausted"
+					continue
+				}
+				reachable := err == nil
+				p.LocalReachable = &reachable
+				if err != nil {
+					p.LocalError = err.Error()
+				} else {
+					conn.Close()
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

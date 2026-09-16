@@ -26,11 +26,23 @@ func (Systemd) run(args ...string) (string, error) {
 	return string(out), nil
 }
 
-func (s Systemd) DaemonReload() error       { _, err := s.run("daemon-reload"); return err }
-func (s Systemd) Enable(unit string) error  { _, err := s.run("enable", unit); return err }
-func (s Systemd) Disable(unit string) error { _, err := s.run("disable", unit); return err }
-func (s Systemd) Start(unit string) error   { _, err := s.run("start", unit); return err }
-func (s Systemd) Stop(unit string) error    { _, err := s.run("stop", unit); return err }
+func (s Systemd) DaemonReload() error      { _, err := s.run("daemon-reload"); return err }
+func (s Systemd) Enable(unit string) error { _, err := s.run("enable", unit); return err }
+func (s Systemd) Disable(unit string) error {
+	_, err := s.run("disable", unit)
+	if err != nil && s.unitMissing(unit) {
+		return nil
+	}
+	return err
+}
+func (s Systemd) Start(unit string) error { _, err := s.run("start", unit); return err }
+func (s Systemd) Stop(unit string) error {
+	_, err := s.run("stop", unit)
+	if err != nil && s.unitMissing(unit) {
+		return nil
+	}
+	return err
+}
 func (s Systemd) Restart(unit string) error { _, err := s.run("restart", unit); return err }
 
 // IsActive reports whether the unit is currently active (running).
@@ -102,4 +114,11 @@ func (s Systemd) Configure(unit, binary, config string) error {
 		return err
 	}
 	return s.DaemonReload()
+}
+
+// A first apply can fail before creating a unit. Deleting that connection must
+// converge too, while real systemd/permission failures remain retryable errors.
+func (s Systemd) unitMissing(unit string) bool {
+	out, err := s.run("show", "--property=LoadState", "--value", unit)
+	return err == nil && strings.TrimSpace(out) == "not-found"
 }

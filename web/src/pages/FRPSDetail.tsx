@@ -55,6 +55,7 @@ export default function FRPSDetail() {
   const openEdit = () => {
     form.setFieldsValue({
       name: data?.name,
+ vhost_http_port: data?.vhost_http_port, vhost_https_port: data?.vhost_https_port, subdomain_host: data?.subdomain_host,
       public_ip: data?.public_ip || '',
       bind_port: data?.bind_port,
       dashboard_port: data?.dashboard_port ?? undefined,
@@ -71,6 +72,7 @@ export default function FRPSDetail() {
   const onSave = (v: any) => {
     update.mutate({
       name: v.name,
+ vhost_http_port: v.vhost_http_port || 0, vhost_https_port: v.vhost_https_port || 0, subdomain_host: v.subdomain_host || "",
       public_ip: v.public_ip ?? '',
       bind_port: v.bind_port,
       dashboard_port: v.dashboard_port ?? null,
@@ -107,7 +109,7 @@ export default function FRPSDetail() {
               showIcon
               style={{ marginBottom: 12 }}
               message="未设置公网 IP"
-              description="frpc 通过公网 IP 连接此节点。未设置时连接地址为占位符，frpc 将无法连通。请填写公网 IP，或等待该节点的 Agent 上线后自动识别。"
+              description="请编辑节点，填写内网 Agent 可以访问的 FRPS 地址。Agent 的心跳来源不能用来推断隧道入口地址。"
             />
           )}
           <Descriptions column={1} bordered size="small">
@@ -117,6 +119,7 @@ export default function FRPSDetail() {
             <Descriptions.Item label="公网 IP">
               {data?.public_ip ? <span className="mono">{data.public_ip}</span> : <Typography.Text type="warning">未设置</Typography.Text>}
             </Descriptions.Item>
+            <Descriptions.Item label="HTTP / HTTPS 入口">{data?.vhost_http_port || "未启用"} / {data?.vhost_https_port || "未启用"}</Descriptions.Item>
             <Descriptions.Item label="Dashboard 端口">{data?.dashboard_port || '未启用'}</Descriptions.Item>
             <Descriptions.Item label="支持传输">
               {nodeProtocols(data).map((p) => (
@@ -169,7 +172,7 @@ export default function FRPSDetail() {
           <Form.Item name="name" label="节点名称" rules={[{ required: true }]}>
             <Input placeholder="例如 edge-tokyo" />
           </Form.Item>
-          <Form.Item name="public_ip" label="公网 IP" extra="frpc 连接此地址；留空将由 Agent 上线后自动识别">
+          <Form.Item name="public_ip" label="FRPS 可达地址" rules={[{ required: true }]} extra="填写内网 Agent 能访问的 IP 或域名，不含协议和端口">
             <Input allowClear placeholder="例如 203.0.113.10" />
           </Form.Item>
           <DNSResolver onResolved={(ip) => form.setFieldValue('public_ip', ip)} />
@@ -191,7 +194,15 @@ export default function FRPSDetail() {
             <Input placeholder="例如 0.61.1" />
           </Form.Item>
 
-          <Divider orientation="left" plain>传输协议</Divider>
+          <Divider orientation="left" plain>HTTP / HTTPS 域名入口</Divider>
+          <Form.Item name="vhost_http_port" label="HTTP 入口端口" extra="0 或留空表示关闭；使用 HTTP 映射时必须启用">
+            <InputNumber min={0} max={65535} />
+          </Form.Item>
+          <Form.Item name="vhost_https_port" label="HTTPS 入口端口" extra="TLS 透传，内网目标需提供 HTTPS；0 或留空表示关闭">
+            <InputNumber min={0} max={65535} />
+          </Form.Item>
+          <Form.Item name="subdomain_host" label="子域名根域（选填）"><Input placeholder="tunnel.example.com" /></Form.Item>
+<Divider orientation="left" plain>传输协议</Divider>
           <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
             TCP / WebSocket 复用服务端口。KCP / QUIC 基于 UDP，需在防火墙开放对应端口。关闭开关即停用该传输（仍在使用它的客户端需改用其他协议）。
           </Typography.Paragraph>

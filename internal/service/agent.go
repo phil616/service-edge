@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,12 +172,17 @@ func (s *Service) buildHostConfigSnapshot(hostUUID, osName, arch string) (*proto
 	if err != nil {
 		return nil, err
 	}
-	binary, err := s.frpBinary(host.FrpVersion, osName, arch)
-	if err != nil {
-		return nil, err
+	var binary protocol.FrpBinary
+	if len(host.Connections) > 0 {
+		binary, err = s.frpBinary(host.FrpVersion, osName, arch)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	resp := &protocol.HostConfigResponse{
 		ConfigVersion: host.ConfigVersion,
+		Connections:   []protocol.ConnectionConfig{},
 		FrpBinary:     binary,
 		CACert:        s.CA.CertPEM(),
 	}
@@ -197,7 +200,7 @@ func (s *Service) buildHostConfigSnapshot(hostUUID, osName, arch string) (*proto
 		if serverAddr == "" {
 			configError = "目标 frps 未配置可达地址，请设置 public_ip（IP 或域名）"
 		}
-		adminUser, adminPass := protocol.FRPCAdminCreds(conn.UUID, s.Cfg.AgentAPIToken)
+		adminUser, adminPass := protocol.FRPCAdminCreds(conn.UUID, protocol.AgentToken(s.Cfg.AgentAPIToken, "frpc", hostUUID))
 		resp.Connections = append(resp.Connections, protocol.ConnectionConfig{
 			UUID:          conn.UUID,
 			ConfigError:   configError,
@@ -260,42 +263,6 @@ func (s *Service) localFRPDist(filename string) *model.FRPDistFile {
 		}
 	}
 	return &row
-}
-
-// NoteFRPSPublicIP auto-fills an frps node's public IP from the source address
-// the agent connects from, but only when it is not already set. frpc clients dial
-// this address (serverAddr); without it they get a non-resolvable placeholder
-// ("frps-<uuid>") and cannot connect. Setting it bumps connected frpc clients so
-// their config is re-rendered with the real address. A manually set IP is never
-// overwritten; loopback sources are ignored (never a usable remote dial address).
-func (s *Service) NoteFRPSPublicIP(agentType, uuid, ip string) {
-	if agentType != "frps" || ip == "" {
-		return
-	}
-	if parsed := net.ParseIP(ip); parsed == nil || parsed.IsLoopback() || parsed.IsUnspecified() {
-		return
-	}
-	var hosts []string
-	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&model.FRPSNode{}).Where("uuid = ? AND (public_ip IS NULL OR public_ip = '')", uuid).Update("public_ip", ip)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil
-		}
-		var err error
-		hosts, err = bumpClientsOfTx(tx, uuid)
-		return err
-	})
-	if err != nil {
-		slog.Warn("record frps public address", "uuid", uuid, "error", err)
-		return
-	}
-	for _, host := range hosts {
-		s.Notifier.Publish(host)
-	}
-
 }
 
 // RecordHeartbeat updates last_heartbeat/status from a heartbeat ping.
@@ -390,6 +357,9 @@ func (s *Service) RecordAppliedVersion(agentType, uuid string, version int) erro
 }
 
 func (s *Service) RecordConfigAck(agentType, uuid string, req protocol.AckRequest) error {
+	if handled, err := s.RecordRetirementAck(agentType, uuid, req); handled || err != nil {
+		return err
+	}
 	return s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		scoped := *s
 		scoped.Store = &store.Store{DB: tx}
@@ -453,16 +423,13 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 				st = "online"
 			}
 			for _, ps := range cs.ProxyStatuses {
-				if ps.Status != "running" {
+				if ps.Status != "running" || (ps.LocalReachable != nil && !*ps.LocalReachable) {
 					st = "degraded"
 					break
 				}
 			}
 		}
-		if req.ConnectionsOnly && cs.ProcessAlive && available && len(cs.ProxyStatuses) == 0 &&
-			(conn.Status == "online" || conn.Status == "degraded") {
-			st = conn.Status
-		}
+
 		// A report for an older config must not be attached to today's proxy definitions.
 		current := (cs.ConfigVersion == 0 && req.ConnectionReportIntervalSeconds == 0) || cs.ConfigVersion == conn.ConfigVersion
 		if !current {
@@ -478,14 +445,11 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 		if err := s.Store.DB.Model(&conn).UpdateColumns(updates).Error; err != nil {
 			return err
 		}
-		// Only a full snapshot can prove that an absent proxy is missing. The
-		// 10-second lightweight report may race frpc reconnect/startup and must
-		// never erase a previously confirmed proxy observation.
-		if !req.ConnectionsOnly {
-			if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ?", cs.UUID).
-				UpdateColumns(map[string]any{"observed_status": "unknown", "observed_error": statusError, "observed_at": now}).Error; err != nil {
-				return err
-			}
+		// Both report channels contain a full /api/status snapshot. An empty
+		// snapshot on reconnect is unknown, never evidence of a working proxy.
+		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ?", cs.UUID).
+			UpdateColumns(map[string]any{"observed_status": "unknown", "observed_error": statusError, "observed_at": now, "local_reachable": nil, "local_error": ""}).Error; err != nil {
+			return err
 		}
 		if current && available {
 			if err := s.applyProxyStatuses(cs.UUID, cs.ProxyStatuses); err != nil {
@@ -495,7 +459,7 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 			if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND inactive = ? AND observed_status = ?", cs.UUID, false, "unknown").Count(&missing).Error; err != nil {
 				return err
 			}
-			if !req.ConnectionsOnly && missing > 0 && (st == "online" || st == "idle") {
+			if missing > 0 && (st == "online" || st == "idle") {
 				if err := s.Store.DB.Model(&conn).UpdateColumns(map[string]any{"status": "unknown", "status_error": "代理状态不完整"}).Error; err != nil {
 					return err
 				}
@@ -509,7 +473,7 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 func (s *Service) applyProxyStatuses(connUUID string, statuses []protocol.ProxyStatus) error {
 	for _, st := range statuses {
 		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND name = ?", connUUID, strings.TrimPrefix(st.Name, connUUID+".")).
-			UpdateColumns(map[string]any{"observed_status": st.Status, "observed_error": st.Err, "observed_at": time.Now()}).Error; err != nil {
+			UpdateColumns(map[string]any{"observed_status": st.Status, "observed_error": st.Err, "observed_at": time.Now(), "local_reachable": st.LocalReachable, "local_error": st.LocalError}).Error; err != nil {
 			return err
 		}
 	}

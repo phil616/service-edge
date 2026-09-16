@@ -18,6 +18,7 @@ type Runner struct {
 	cfg           *Config
 	client        *Client
 	state         *State
+	instanceBase  string
 	systemd       processManager
 	operationMu   sync.Mutex
 	statusMu      sync.Mutex
@@ -165,6 +166,11 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 				backoff = time.Second
 				continue
 			}
+			if bundle.Decommission {
+				r.decommission(ctx, bundle.ConfigVersion)
+				sleepCtx(ctx, 30*time.Second)
+				continue
+			}
 			if !r.reconcile(ctx, bundle) {
 				// Apply incomplete: the host version was not advanced, so the next
 				// poll re-delivers the bundle. Back off so we don't churn-restart frp.
@@ -194,6 +200,11 @@ func (r *Runner) configSyncLoop(ctx context.Context) {
 		}
 		if notModified {
 			backoff = time.Second
+			continue
+		}
+		if bundle.Decommission {
+			r.decommission(ctx, bundle.ConfigVersion)
+			sleepCtx(ctx, 30*time.Second)
 			continue
 		}
 		if !r.applyBundle(ctx, bundle) {

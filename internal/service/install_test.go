@@ -4,6 +4,7 @@ import (
 	"github.com/dreamreflex/service-edge/internal/agent"
 	"github.com/dreamreflex/service-edge/internal/config"
 	"github.com/dreamreflex/service-edge/internal/model"
+	"github.com/dreamreflex/service-edge/internal/protocol"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestGeneratedInstallerMatchesAgentConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("installer produces unusable Agent: %v", err)
 			}
-			if cfg.APIToken != s.Cfg.AgentAPIToken || cfg.AgentType != kind || cfg.ConfigPollTimeout.Std() != 60*time.Second {
+			if cfg.APIToken != protocol.AgentToken(s.Cfg.AgentAPIToken, kind, "host") || cfg.AgentType != kind || cfg.ConfigPollTimeout.Std() != 60*time.Second {
 				t.Fatal("generated config lost values")
 			}
 			if strings.Contains(script, "/tmp/frp_") || strings.Contains(script, "/tmp/frp.tar.gz") {
@@ -70,6 +71,9 @@ func TestGeneratedInstallerMatchesAgentConfiguration(t *testing.T) {
 }
 func TestEnrollmentRetryIsBoundToIdentity(t *testing.T) {
 	s := newTestService(t)
+	if err := s.Store.DB.Create(&model.FRPCHost{UUID: "h", Name: "host"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Store.DB.Create(&model.EnrollmentToken{Token: "t", TargetType: "frpc", TargetUUID: "h", ExpiresAt: time.Now().Add(time.Minute)}).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -42,6 +42,9 @@ export interface CertInfo {
 export type TransportProtocol = 'tcp' | 'kcp' | 'quic' | 'websocket' | 'wss'
 
 export interface FRPSNode {
+ vhost_http_port: number
+ vhost_https_port: number
+ subdomain_host: string
   id: number
   uuid: string
   name: string
@@ -62,6 +65,8 @@ export interface FRPSNode {
 }
 
 export interface ProxyMapping {
+  local_reachable?: boolean | null
+  local_error?: string
   observed_status?: string
   observed_error?: string
   observed_at?: string | null
@@ -180,4 +185,13 @@ export interface FRPDistFile {
   arch: string
   size: number
   created_at: string
+}
+
+export interface AgentRetirement {
+ agent_type: 'frps' | 'frpc'
+ uuid: string
+ config_version: number
+ created_at: string
+ completed_at: string | null
+ last_error?: string
 }

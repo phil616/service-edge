@@ -3,6 +3,7 @@
 package protocol
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 )
@@ -15,6 +16,14 @@ const (
 	FRPCAdminUser = "service-edge-agent"
 )
 
+// AgentToken binds a credential to one role and identity. The master key stays
+// exclusively on the control plane; an agent cannot derive a sibling credential.
+func AgentToken(master, kind, uuid string) string {
+	mac := hmac.New(sha256.New, []byte(master))
+	mac.Write([]byte("service-edge/agent/v2\x00" + kind + "\x00" + uuid))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 // FRPCAdminCreds derives the frpc admin-API credentials deterministically from
 // the agent UUID and the shared agent API token, so the control plane (renderer)
 // and the agent compute identical values without extra plumbing.
@@ -25,11 +34,14 @@ func FRPCAdminCreds(uuid, apiToken string) (user, password string) {
 
 // ProxyStatus is one proxy's live status as reported by frpc's admin API.
 type ProxyStatus struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Status     string `json:"status"` // running | start error | check failed | ...
-	Err        string `json:"err,omitempty"`
-	RemoteAddr string `json:"remote_addr,omitempty"`
+	LocalAddr      string `json:"local_addr,omitempty"`
+	LocalReachable *bool  `json:"local_reachable"`
+	LocalError     string `json:"local_error,omitempty"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	Status         string `json:"status"` // running | start error | check failed | ...
+	Err            string `json:"err,omitempty"`
+	RemoteAddr     string `json:"remote_addr,omitempty"`
 }
 
 // SystemInfo describes the host an agent runs on.
@@ -93,6 +105,7 @@ type FrpBinary struct {
 // ConfigResponse is the long-poll payload delivered when a newer config exists
 // (frps agents — a single frp process).
 type ConfigResponse struct {
+	Decommission  bool      `json:"decommission,omitempty"`
 	ConfigVersion int       `json:"config_version"`
 	FrpBinary     FrpBinary `json:"frp_binary"`
 	FrpConfig     string    `json:"frp_config"`
@@ -116,6 +129,7 @@ type ConnectionConfig struct {
 // connections (frpc processes) the host's agent must reconcile. The shared frp
 // binary and CA cert are delivered once at the host level.
 type HostConfigResponse struct {
+	Decommission  bool               `json:"decommission,omitempty"`
 	ConfigVersion int                `json:"config_version"`
 	FrpBinary     FrpBinary          `json:"frp_binary"`
 	CACert        string             `json:"ca_cert"`

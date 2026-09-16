@@ -32,6 +32,7 @@ export default function FRPSNew() {
   const onFinish = (values: Record<string, unknown>) => {
     const body: Record<string, unknown> = {
       name: values.name,
+ vhost_http_port: values.vhost_http_port || 0, vhost_https_port: values.vhost_https_port || 0, subdomain_host: values.subdomain_host || "",
       bind_port: values.bind_port,
       public_ip: values.public_ip || '',
       frp_version: values.frp_version || '',
@@ -61,7 +62,7 @@ export default function FRPSNew() {
         <Form.Item name="bind_port" label="服务端口" rules={[{ required: true }]} extra="frpc 连接的 TCP 端口，需在防火墙/安全组开放">
           <InputNumber min={1} max={65535} style={{ width: '100%' }} />
         </Form.Item>
-        <Form.Item name="public_ip" label="公网 IP（选填）" extra="用于生成 frpc 的连接地址与访问提示">
+        <Form.Item name="public_ip" label="FRPS 可达地址" rules={[{ required: true }]} extra="填写内网 Agent 能访问的公网 IP 或域名，不含协议和端口">
           <Input placeholder="例如 203.0.113.10" />
         </Form.Item>
         <DNSResolver onResolved={(ip) => form.setFieldValue('public_ip', ip)} />
@@ -90,7 +91,15 @@ export default function FRPSNew() {
           </Form.Item>
         )}
 
-        <Divider orientation="left" plain>Dashboard</Divider>
+        <Divider orientation="left" plain>HTTP / HTTPS 域名入口</Divider>
+          <Form.Item name="vhost_http_port" label="HTTP 入口端口" extra="0 或留空表示关闭；使用 HTTP 映射时必须启用">
+            <InputNumber min={0} max={65535} />
+          </Form.Item>
+          <Form.Item name="vhost_https_port" label="HTTPS 入口端口" extra="TLS 透传，内网目标需提供 HTTPS；0 或留空表示关闭">
+            <InputNumber min={0} max={65535} />
+          </Form.Item>
+          <Form.Item name="subdomain_host" label="子域名根域（选填）"><Input placeholder="tunnel.example.com" /></Form.Item>
+<Divider orientation="left" plain>Dashboard</Divider>
         <Form.Item name="dashboard_enabled" label="启用 Dashboard" valuePropName="checked">
           <Switch />
         </Form.Item>

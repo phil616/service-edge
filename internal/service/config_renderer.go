@@ -17,6 +17,15 @@ func RenderFRPSConfig(node *model.FRPSNode) string {
 	p := frp.FRPSPaths()
 	var b strings.Builder
 	fmt.Fprintf(&b, "bindPort = %d\n", node.BindPort)
+	if node.VhostHTTPPort > 0 {
+		fmt.Fprintf(&b, "vhostHTTPPort = %d\n", node.VhostHTTPPort)
+	}
+	if node.VhostHTTPSPort > 0 {
+		fmt.Fprintf(&b, "vhostHTTPSPort = %d\n", node.VhostHTTPSPort)
+	}
+	if node.SubdomainHost != "" {
+		fmt.Fprintf(&b, "subDomainHost = %q\n", node.SubdomainHost)
+	}
 	// Enable the UDP-based control transports the node offers. KCP may reuse the
 	// bindPort number; QUIC must be distinct (validated on write).
 	if node.KCPBindPort != nil {
@@ -109,13 +118,13 @@ func RenderFRPCConfig(conn *model.FRPCConnection, node *model.FRPSNode, serverAd
 		}
 		fmt.Fprintf(&b, "localIP = %q\n", localIP)
 		fmt.Fprintf(&b, "localPort = %d\n", px.LocalPort)
-		if px.RemotePort != nil && *px.RemotePort > 0 {
+		if (px.ProxyType == "tcp" || px.ProxyType == "udp") && px.RemotePort != nil && *px.RemotePort > 0 {
 			fmt.Fprintf(&b, "remotePort = %d\n", *px.RemotePort)
 		}
-		if domains := parseDomains(px.CustomDomains); len(domains) > 0 {
+		if domains := parseDomains(px.CustomDomains); (px.ProxyType == "http" || px.ProxyType == "https") && len(domains) > 0 {
 			fmt.Fprintf(&b, "customDomains = %s\n", tomlStringArray(domains))
 		}
-		if px.Subdomain != "" {
+		if (px.ProxyType == "http" || px.ProxyType == "https") && px.Subdomain != "" {
 			fmt.Fprintf(&b, "subdomain = %q\n", px.Subdomain)
 		}
 	}

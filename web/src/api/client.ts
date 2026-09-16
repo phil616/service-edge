@@ -3,6 +3,7 @@ import { message } from 'antd'
 import { useAuth } from '../store/auth'
 import type {
   AgentDownloadSettings,
+  AgentRetirement,
   AuditLog,
   CertInfo,
   FRPCConnection,
@@ -198,4 +199,9 @@ export async function listAuditLogs(limit = 100, offset = 0) {
     `/api/v1/audit-logs?limit=${limit}&offset=${offset}`,
   )
   return data
+}
+
+export async function listAgentRetirements() {
+ const { data } = await http.get<{ items: AgentRetirement[] }>('/api/v1/agent-retirements')
+ return data.items
 }

@@ -5,8 +5,8 @@ server:
 database:
   path: "/var/lib/service-edge/data.db"
 
-# Agent <-> control-plane API auth token (all agents share this token for API auth).
-# NOT the frpc <-> frps token. Recommend 64 random chars.
+# Control-plane-only master key used to derive role/UUID-bound Agent credentials.
+# Never distribute this key to agents. NOT the frpc <-> frps token. Use 64 random chars.
 agent_api_token: "CHANGE_ME_agent_api_token_64_random_chars________________________"
 
 # JWT signing secret for user login. Recommend 64 random chars.
@@ -18,8 +18,8 @@ pki:
   ca_cert: "/etc/service-edge/ca.crt"
   ca_key: "/etc/service-edge/ca.key"
 
-# FRP archives must be uploaded by an administrator before agents can enroll or
-# apply a configuration. The old base_url field is retained for compatibility
+# FRP archives must be uploaded by an administrator before applying a non-empty
+# configuration. Agent enrollment and empty-host cleanup do not require an archive. The old base_url field is retained for compatibility
 # but is never used for automatic downloads.
 frp_release:
   default_version: "v0.61.1"

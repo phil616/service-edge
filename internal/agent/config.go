@@ -1,7 +1,6 @@
-// Package agent implements the on-host agent that manages a single frp process
-// (frps node or one frpc instance): it enrolls, heartbeats, reports status,
-// long-polls for config, applies config atomically with rollback, and keeps the
-// frp process alive via a watchdog.
+// Package agent implements on-host management of one frps or many frpc
+// processes. It reports liveness and observed status, reconciles complete
+// configurations, and delegates process supervision to systemd.
 package agent
 
 import (

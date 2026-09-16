@@ -37,6 +37,10 @@ type AgentRuntime struct {
 
 // FRPSNode is a public edge node running frps.
 type FRPSNode struct {
+	VhostHTTPPort  int    `json:"vhost_http_port"`
+	VhostHTTPSPort int    `json:"vhost_https_port"`
+	SubdomainHost  string `json:"subdomain_host"`
+
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	UUID          string     `gorm:"column:uuid;uniqueIndex;not null" json:"uuid"`
 	Name          string     `gorm:"not null" json:"name"`
@@ -116,6 +120,8 @@ type FRPCConnection struct {
 
 // ProxyMapping is one port mapping belonging to an frpc client.
 type ProxyMapping struct {
+	LocalReachable *bool      `json:"local_reachable"`
+	LocalError     string     `json:"local_error,omitempty"`
 	ObservedStatus string     `json:"observed_status,omitempty"`
 	ObservedError  string     `json:"observed_error,omitempty"`
 	ObservedAt     *time.Time `json:"observed_at,omitempty"`
@@ -181,6 +187,17 @@ type FRPDistFile struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// AgentRetirement is a durable stop instruction retained after deleting a node.
+// Offline agents must still authenticate and receive it when they reconnect.
+type AgentRetirement struct {
+	AgentType     string     `gorm:"primaryKey" json:"agent_type"`
+	UUID          string     `gorm:"primaryKey" json:"uuid"`
+	ConfigVersion int        `json:"config_version"`
+	CreatedAt     time.Time  `json:"created_at"`
+	CompletedAt   *time.Time `json:"completed_at"`
+	LastError     string     `json:"last_error,omitempty"`
+}
+
 // AllModels returns every model for auto-migration.
 func AllModels() []any {
 	return []any{
@@ -193,5 +210,6 @@ func AllModels() []any {
 		&AuditLog{},
 		&Setting{},
 		&FRPDistFile{},
+		&AgentRetirement{},
 	}
 }

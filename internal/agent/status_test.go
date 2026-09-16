@@ -99,3 +99,26 @@ func TestReportUploadsAfterCollectionTimesOut(t *testing.T) {
 		t.Fatal("collection timeout suppressed upload")
 	}
 }
+
+func TestLocalProbeDistinguishesRegistrationFromBackendHealth(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	address := target.Listener.Addr().String()
+	statuses := []protocol.ProxyStatus{{Status: "running", Type: "tcp", LocalAddr: address}, {Status: "running", Type: "udp", LocalAddr: address}}
+	probeLocalTargets(context.Background(), statuses)
+	if statuses[0].LocalReachable == nil || !*statuses[0].LocalReachable || statuses[1].LocalReachable != nil {
+		t.Fatal(statuses)
+	}
+	target.Close()
+	statuses = []protocol.ProxyStatus{{Status: "running", Type: "tcp", LocalAddr: address}}
+	probeLocalTargets(context.Background(), statuses)
+	if statuses[0].Status != "running" || statuses[0].LocalReachable == nil || *statuses[0].LocalReachable || statuses[0].LocalError == "" {
+		t.Fatal(statuses)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	statuses = []protocol.ProxyStatus{{Status: "running", Type: "tcp", LocalAddr: address}}
+	probeLocalTargets(ctx, statuses)
+	if statuses[0].LocalReachable != nil {
+		t.Fatal("canceled observation reported as definitive failure")
+	}
+}

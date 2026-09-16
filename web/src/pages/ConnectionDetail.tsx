@@ -69,14 +69,12 @@ export default function ConnectionDetail() {
     if ((p.proxy_type === 'tcp' || p.proxy_type === 'udp') && p.remote_port) {
       return `${node?.public_ip || '<公网IP>'}:${p.remote_port}`
     }
-    if (p.custom_domains) {
-      try {
-        return (JSON.parse(p.custom_domains) as string[]).join(', ')
-      } catch {
-        return p.custom_domains
-      }
-    }
-    return p.subdomain || '-'
+    const port = p.proxy_type === 'http' ? node?.vhost_http_port : node?.vhost_https_port
+    const defaultPort = p.proxy_type === 'http' ? 80 : 443
+    const domains = domainsToText(p.custom_domains).split(',').map(s => s.trim()).filter(Boolean)
+    if (p.subdomain && node?.subdomain_host) domains.push(`${p.subdomain}.${node.subdomain_host}`)
+    return domains.map(d => `${p.proxy_type}://${d}${port && port !== defaultPort ? `:${port}` : ''}`).join(', ') || '-'
+
   }
 
   const openAdd = () => {
@@ -125,6 +123,16 @@ export default function ConnectionDetail() {
         const label = status === 'running' ? '已注册' : status === 'unknown' ? '未知' : status
         return <Tooltip title={expired ? '状态已过期，等待 Agent 上报' : r.observed_error || '代理注册状态不代表业务端到端可用'}>
           <Tag color={status === 'running' ? 'success' : status === 'unknown' ? 'default' : 'error'}>{label}</Tag>
+        </Tooltip>
+      },
+    },
+    {
+      title: '内网目标',
+      render: (_: unknown, r: ProxyMapping) => {
+        const fresh = data?.status_expires_at && Date.parse(data.status_expires_at) > Date.now() && data.applied_config_version === data.config_version && data.process_alive
+        const reachable = fresh ? r.local_reachable : null
+        return <Tooltip title={r.local_error || (r.proxy_type === 'udp' ? 'UDP 需要实际业务请求验证' : '检查 Agent 到内网目标的 TCP 连接；公网入口仍需实际访问验证')}>
+          <Tag color={reachable === true ? 'success' : reachable === false ? 'error' : 'default'}>{reachable === true ? 'TCP 可达' : reachable === false ? '连接失败' : '未验证'}</Tag>
         </Tooltip>
       },
     },
@@ -181,7 +189,7 @@ export default function ConnectionDetail() {
           </Descriptions>
         </Card>
         <Card title="端口映射" extra={<Button icon={<PlusOutlined />} onClick={openAdd}>新增映射</Button>} style={{ marginBottom: 16 }}>
-          <Table rowKey="id" dataSource={data?.proxies ?? []} columns={columns} pagination={false} />
+          <Table rowKey="id" dataSource={data?.proxies ?? []} columns={columns} pagination={false} scroll={{ x: 1000 }} />
         </Card>
         <Card title="连接证书 (frpc client)" size="small">
           <CertDescriptions info={data?.tls_cert_info} />

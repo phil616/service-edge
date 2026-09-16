@@ -106,7 +106,7 @@ func (s *Service) UpdateFRPCHost(uuid string, in UpdateFRPCHostInput) (*model.FR
 }
 
 func (s *Service) DeleteFRPCHost(uuid string) error {
-	return s.Store.DB.Transaction(func(tx *gorm.DB) error {
+	err := s.Store.DB.Transaction(func(tx *gorm.DB) error {
 		var connUUIDs []string
 		if err := tx.Model(&model.FRPCConnection{}).Where("host_uuid = ?", uuid).Pluck("uuid", &connUUIDs).Error; err != nil {
 			return err
@@ -119,6 +119,9 @@ func (s *Service) DeleteFRPCHost(uuid string) error {
 				return err
 			}
 		}
+		if err := retireAgentTx(tx, "frpc", uuid); err != nil {
+			return err
+		}
 		res := tx.Where("uuid = ?", uuid).Delete(&model.FRPCHost{})
 		if res.Error != nil {
 			return res.Error
@@ -128,6 +131,10 @@ func (s *Service) DeleteFRPCHost(uuid string) error {
 		}
 		return nil
 	})
+	if err == nil {
+		s.Notifier.Publish(uuid)
+	}
+	return err
 }
 
 // bumpHostTx makes the aggregate revision part of the configuration transaction.

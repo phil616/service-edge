@@ -8,7 +8,7 @@ package frp
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
+	"regexp"
 )
 
 const (
@@ -52,9 +52,11 @@ func FRPSPaths() DeployPaths {
 	}
 }
 
+var instanceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
+
 // FRPCInstanceDir validates the identifier before constructing a destructive-operation path.
 func FRPCInstanceDir(baseDir, uuid string) (string, error) {
-	if uuid == "" || uuid == "." || uuid == ".." || strings.ContainsAny(uuid, "/\\") {
+	if !instanceIDPattern.MatchString(uuid) {
 		return "", fmt.Errorf("invalid connection identifier %q", uuid)
 	}
 	return filepath.Join(baseDir, "instances", uuid), nil
@@ -62,7 +64,11 @@ func FRPCInstanceDir(baseDir, uuid string) (string, error) {
 
 // FRPCPaths returns the standard layout for one frpc instance identified by uuid.
 func FRPCPaths(uuid string) DeployPaths {
-	inst := filepath.Join(FRPCBaseDir, "instances", uuid)
+	return FRPCPathsAt(FRPCBaseDir, uuid)
+}
+
+func FRPCPathsAt(base, uuid string) DeployPaths {
+	inst := filepath.Join(base, "instances", uuid)
 	cfg := filepath.Join(inst, "config")
 	return DeployPaths{
 		ConfigDir:  cfg,

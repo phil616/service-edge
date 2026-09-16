@@ -14,9 +14,9 @@ import {
 } from 'antd'
 import { DeleteOutlined, InboxOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchMe, getCAInfo, getSettings, updateSettings, listFRPDists, uploadFRPDist, deleteFRPDist } from '../api/client'
+import { listAgentRetirements, fetchMe, getCAInfo, getSettings, updateSettings, listFRPDists, uploadFRPDist, deleteFRPDist } from '../api/client'
 import CertDescriptions from '../components/CertDescriptions'
-import type { FRPDistFile } from '../api/types'
+import type { AgentRetirement, FRPDistFile } from '../api/types'
 
 // GitHub Release 作为 Agent 下载源：安装脚本会在基址后追加 _linux_<arch>，
 // 恰好对应 Release 产物 agent_linux_amd64 / agent_linux_arm64。
@@ -163,7 +163,7 @@ function FRPDistCard() {
     >
       <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
         上传 GitHub 官方 frp release 产物（<Typography.Text code>frp_{'<version>'}_{'{'}os{'}'}_{'{'}arch{'}'}.tar.gz</Typography.Text>），
-        安装脚本会优先从此处下载，无法访问时自动回退到 GitHub。可同时存储多个版本，支持 amd64 / arm64 等多架构。
+        Agent 从控制面下载指定版本；请先上传对应版本及架构的发行包。可同时存储多个版本，支持 amd64 / arm64 等多架构。
       </Typography.Paragraph>
       <Table<FRPDistFile>
         dataSource={dists}
@@ -176,6 +176,19 @@ function FRPDistCard() {
       />
     </Card>
   )
+}
+
+function AgentRetirementCard() {
+ const { data = [], isLoading } = useQuery({ queryKey: ['agent-retirements'], queryFn: listAgentRetirements, refetchInterval: 5000 })
+ return <Card title="节点删除与远端清理">
+  <Typography.Paragraph type="secondary">删除节点后，Agent 会停止并禁用受管 FRP 服务。离线节点会在重新连接后执行；确认完成前，原隧道可能仍在运行。这里只显示最近 200 条记录。</Typography.Paragraph>
+  <Table<AgentRetirement> dataSource={data} loading={isLoading} rowKey={r => `${r.agent_type}:${r.uuid}`} size="small" pagination={{ pageSize: 5 }} columns={[
+   { title: '类型', dataIndex: 'agent_type' },
+   { title: '节点', dataIndex: 'uuid', render: (v: string) => <Typography.Text copyable>{v}</Typography.Text> },
+   { title: '清理状态', render: (_: unknown, r: AgentRetirement) => <Tag color={r.completed_at ? 'green' : r.last_error ? 'red' : 'orange'}>{r.completed_at ? '已停止并禁用' : r.last_error ? '失败，等待重试' : '等待 Agent 确认'}</Tag> },
+   { title: '详情', render: (_: unknown, r: AgentRetirement) => r.completed_at ? new Date(r.completed_at).toLocaleString() : r.last_error || 'Agent 重新连接后自动执行' },
+  ]} locale={{ emptyText: '暂无删除记录' }} />
+ </Card>
 }
 
 export default function Settings() {
@@ -245,6 +258,7 @@ export default function Settings() {
       </Card>
 
       <FRPDistCard />
+      <AgentRetirementCard />
 
       <Card title="CA 证书详情">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>

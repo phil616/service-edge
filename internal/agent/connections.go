@@ -17,10 +17,8 @@ import (
 )
 
 type processManager interface {
-	Enable(string) error
+	deploymentProcess
 	Disable(string) error
-	Stop(string) error
-	Restart(string) error
 	IsActive(string) bool
 	MainPID(string) int
 	ProcessStatus(context.Context, string) (bool, int, error)
@@ -45,9 +43,12 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 	r.operationMu.Lock()
 	defer r.operationMu.Unlock()
 	// Validate the entire desired set before touching files or processes.
+	if bundle == nil || bundle.ConfigVersion <= 0 || bundle.Connections == nil || bundle.Decommission {
+		return false
+	}
 	desired := map[string]bool{}
 	for _, conn := range bundle.Connections {
-		if _, err := frp.FRPCInstanceDir(frp.FRPCBaseDir, conn.UUID); err != nil {
+		if _, err := frp.FRPCInstanceDir(r.connectionBase(), conn.UUID); err != nil {
 			r.ack(ctx, bundle.ConfigVersion, false, err.Error())
 			return false
 		}
@@ -58,7 +59,12 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 		desired[conn.UUID] = true
 	}
 	var errs []string
-	for _, uuid := range r.state.ConnUUIDs() {
+	known, err := r.managedConnections()
+	if err != nil {
+		r.ack(ctx, bundle.ConfigVersion, false, err.Error())
+		return false
+	}
+	for _, uuid := range known {
 		if desired[uuid] {
 			continue
 		}
@@ -96,7 +102,7 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 			continue
 		}
 		fingerprint := connectionFingerprint(conn, bundle.CACert, bundle.FrpBinary.Version)
-		if st, ok := applied[conn.UUID]; ok && st.Fingerprint == fingerprint && connectionFilesExist(conn.UUID) && r.processNotStopped(ctx, frpcUnit(conn.UUID)) {
+		if st, ok := applied[conn.UUID]; ok && st.Fingerprint == fingerprint && r.connectionFilesExist(conn.UUID) && r.processNotStopped(ctx, frpcUnit(conn.UUID)) {
 			if st.Version != conn.ConfigVersion || st.LastApplyError != "" {
 				if err := r.state.SetConn(conn.UUID, conn.ConfigVersion, conn.AdminPort, fingerprint, bundle.FrpBinary.Version); err != nil {
 					errs = append(errs, conn.UUID+": persist: "+err.Error())
@@ -129,8 +135,8 @@ func (r *Runner) reconcile(ctx context.Context, bundle *protocol.HostConfigRespo
 	return ok
 }
 
-func connectionFilesExist(uuid string) bool {
-	p := frp.FRPCPaths(uuid)
+func (r *Runner) connectionFilesExist(uuid string) bool {
+	p := frp.FRPCPathsAt(r.connectionBase(), uuid)
 	for _, name := range []string{filepath.Base(p.ConfigFile), filepath.Base(p.CertFile), filepath.Base(p.KeyFile), filepath.Base(p.CAFile), "frpc", "activated"} {
 		if info, err := os.Stat(filepath.Join(p.ConfigDir, "current", name)); err != nil || !info.Mode().IsRegular() {
 			return false
@@ -143,9 +149,11 @@ func connectionFilesExist(uuid string) bool {
 // process, reusing the per-instance applier (atomic apply with rollback).
 func (r *Runner) applyConnection(conn protocol.ConnectionConfig, caCert, binary string) error {
 	applier := NewConnectionApplier(conn.UUID, binary)
+	applier.paths = frp.FRPCPathsAt(r.connectionBase(), conn.UUID)
+	applier.systemd = r.systemd
 	cr := &protocol.ConfigResponse{
 		ConfigVersion: conn.ConfigVersion,
-		FrpConfig:     conn.FrpConfig,
+		FrpConfig:     strings.ReplaceAll(conn.FrpConfig, frp.FRPCBaseDir+"/", r.connectionBase()+"/"),
 		TLSCert:       conn.TLSCert,
 		TLSKey:        conn.TLSKey,
 		CACert:        caCert,
@@ -161,7 +169,7 @@ func (r *Runner) applyConnection(conn protocol.ConnectionConfig, caCert, binary 
 }
 
 func (r *Runner) stopConnection(uuid string) error {
-	return removeConnection(r.systemd, frp.FRPCBaseDir, uuid)
+	return removeConnection(r.systemd, r.connectionBase(), uuid)
 }
 
 // Only remove this instance after systemd confirms stop and disable succeeded.
@@ -187,4 +195,72 @@ func (r *Runner) processNotStopped(ctx context.Context, unit string) bool {
 	active, _, err := r.systemd.ProcessStatus(ctx, unit)
 	// An unavailable observation is not a reason to restart a working tunnel.
 	return err != nil || active
+}
+
+func (r *Runner) connectionBase() string {
+	if r.instanceBase != "" {
+		return r.instanceBase
+	}
+	return frp.FRPCBaseDir
+}
+
+// Inventory is not state.json: a crash after activating a unit but before saving
+// state must not turn that unit into an unmanaged, permanently running tunnel.
+func (r *Runner) managedConnections() ([]string, error) {
+	known := map[string]bool{}
+	for _, uuid := range r.state.ConnUUIDs() {
+		known[uuid] = true
+	}
+	entries, err := os.ReadDir(filepath.Join(r.connectionBase(), "instances"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		} // Never follow a symlink outside our inventory.
+		if _, err := frp.FRPCInstanceDir(r.connectionBase(), entry.Name()); err != nil {
+			return nil, err
+		}
+		known[entry.Name()] = true
+	}
+	out := make([]string, 0, len(known))
+	for uuid := range known {
+		out = append(out, uuid)
+	}
+	return out, nil
+}
+
+func (r *Runner) decommission(ctx context.Context, version int) bool {
+	r.operationMu.Lock()
+	defer r.operationMu.Unlock()
+	var err error
+	if r.cfg.AgentType == "frpc" {
+		var known []string
+		known, err = r.managedConnections()
+		if err == nil {
+			for _, uuid := range known {
+				if err = r.stopConnection(uuid); err != nil {
+					break
+				}
+				if err = r.state.RemoveConn(uuid); err != nil {
+					break
+				}
+			}
+		}
+	} else {
+		err = r.systemd.Stop(r.unit)
+		if err == nil {
+			err = r.systemd.Disable(r.unit)
+		}
+	}
+	if err == nil {
+		err = r.state.Save(version, "")
+	}
+	if err != nil {
+		r.ack(ctx, version, false, err.Error())
+		return false
+	}
+	r.ack(ctx, version, true, "")
+	return true
 }

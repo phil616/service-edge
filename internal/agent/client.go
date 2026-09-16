@@ -137,6 +137,9 @@ func (c *Client) PollConfig(ctx context.Context, currentVersion int, osName, arc
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return nil, false, err
 		}
+		if out.ConfigVersion <= 0 {
+			return nil, false, fmt.Errorf("invalid configuration revision")
+		}
 		return &out, false, nil
 	default:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
@@ -172,6 +175,9 @@ func (c *Client) PollHostConfig(ctx context.Context, currentVersion int, osName,
 		var out protocol.HostConfigResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return nil, false, err
+		}
+		if out.ConfigVersion <= 0 || (!out.Decommission && out.Connections == nil) {
+			return nil, false, fmt.Errorf("incomplete host configuration snapshot")
 		}
 		return &out, false, nil
 	default:

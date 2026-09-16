@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/dreamreflex/service-edge/internal/frp"
 	"github.com/dreamreflex/service-edge/internal/protocol"
@@ -112,3 +113,6 @@ func TestAppliedIdentityIncludesSharedBinaryAndCA(t *testing.T) {
 		t.Fatal("version prefix causes spurious restart")
 	}
 }
+
+func (f *fakeProcesses) Configure(string, string, string) error { return nil }
+func (f *fakeProcesses) WaitActive(string, time.Duration) bool  { return true }

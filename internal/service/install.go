@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/dreamreflex/service-edge/internal/protocol"
 	"github.com/dreamreflex/service-edge/scripts"
 )
 
@@ -53,13 +54,13 @@ func (s *Service) RenderInstallScript(targetType, token string) (string, error) 
 		AgentType:        targetType,
 		UUID:             tok.TargetUUID,
 		APIEndpoint:      s.Cfg.Server.ExternalURL,
-		APIToken:         s.Cfg.AgentAPIToken,
+		APIToken:         protocol.AgentToken(s.Cfg.AgentAPIToken, targetType, tok.TargetUUID),
 		EnrollmentToken:  token,
 		AgentDownloadURL: s.AgentDownloadURL(targetType),
 	}
 
 	cfg, err := yaml.Marshal(map[string]any{
-		"agent_type": targetType, "uuid": tok.TargetUUID, "api_endpoint": strings.TrimRight(s.Cfg.Server.ExternalURL, "/"), "api_token": s.Cfg.AgentAPIToken,
+		"agent_type": targetType, "uuid": tok.TargetUUID, "api_endpoint": strings.TrimRight(s.Cfg.Server.ExternalURL, "/"), "api_token": protocol.AgentToken(s.Cfg.AgentAPIToken, targetType, tok.TargetUUID),
 		"heartbeat_interval": "20s", "status_report_interval": "180s", "config_poll_timeout": "60s",
 		"frp_binary_path": "/opt/service-edge/" + targetType + "-agent/bin/" + targetType,
 	})

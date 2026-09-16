@@ -23,6 +23,14 @@ type ProxyMappingInput struct {
 }
 
 func (p ProxyMappingInput) toModel(frpcUUID string) model.ProxyMapping {
+	// Hidden form fields survive switching proxy type; they must not leak into
+	// a different FRP schema or continue reserving an unrelated remote port.
+	if p.ProxyType == "http" || p.ProxyType == "https" {
+		p.RemotePort = nil
+	} else {
+		p.CustomDomains = nil
+		p.Subdomain = ""
+	}
 	localIP := p.LocalIP
 	if localIP == "" {
 		localIP = "127.0.0.1"
@@ -94,6 +102,9 @@ func (s *Service) AddProxy(connUUID string, in ProxyMappingInput) (*model.ProxyM
 		if err != nil {
 			return err
 		}
+		if err := validateProxyListener(in, node); err != nil {
+			return err
+		}
 		if err := validateProxy(in, used); err != nil {
 			return err
 		}
@@ -143,6 +154,9 @@ func (s *Service) UpdateProxy(id uint, in ProxyMappingInput) (*model.ProxyMappin
 		// Exclude this proxy's current port from the occupancy check.
 		if row.RemotePort != nil {
 			delete(used, *row.RemotePort)
+		}
+		if err := validateProxyListener(in, node); err != nil {
+			return err
 		}
 		if err := validateProxy(in, used); err != nil {
 			return err

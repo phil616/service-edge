@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,35 +11,26 @@ const (
 	ctxAgentType = "agent_type"
 )
 
-// RequireAgent validates the shared agent API token and extracts agent identity
-// headers. The enroll endpoint uses RequireAgentToken instead (no UUID yet
-// registered, identity comes from the enrollment token).
-func RequireAgent(agentToken string) gin.HandlerFunc {
+// RequireAgent authenticates the role/UUID together and checks enrollment or
+// a retained retirement record. Unknown identities never reach config handlers.
+func RequireAgent(authorize func(kind, uuid, token string) (bool, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !constantEqual(c.GetHeader("X-Agent-Token"), agentToken) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid agent token"})
-			return
-		}
-		uuid := c.GetHeader("X-Agent-UUID")
-		atype := c.GetHeader("X-Agent-Type")
-		if uuid == "" || (atype != "frps" && atype != "frpc") {
+		uuid, kind := c.GetHeader("X-Agent-UUID"), c.GetHeader("X-Agent-Type")
+		if uuid == "" || (kind != "frps" && kind != "frpc") {
 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "missing X-Agent-UUID/X-Agent-Type"})
 			return
 		}
-		c.Set(ctxAgentUUID, uuid)
-		c.Set(ctxAgentType, atype)
-		c.Next()
-	}
-}
-
-// RequireAgentToken only checks the shared token (used by enroll, where the
-// agent isn't registered yet).
-func RequireAgentToken(agentToken string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !constantEqual(c.GetHeader("X-Agent-Token"), agentToken) {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid agent token"})
+		ok, err := authorize(kind, uuid, c.GetHeader("X-Agent-Token"))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "agent authentication unavailable"})
 			return
 		}
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or unenrolled agent identity"})
+			return
+		}
+		c.Set(ctxAgentUUID, uuid)
+		c.Set(ctxAgentType, kind)
 		c.Next()
 	}
 }
@@ -61,8 +51,4 @@ func AgentType(c *gin.Context) string {
 		}
 	}
 	return ""
-}
-
-func constantEqual(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
