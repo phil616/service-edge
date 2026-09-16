@@ -454,6 +454,10 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 				}
 			}
 		}
+		if req.ConnectionsOnly && cs.ProcessAlive && available && len(cs.ProxyStatuses) == 0 &&
+			(conn.Status == "online" || conn.Status == "degraded") {
+			st = conn.Status
+		}
 		// A report for an older config must not be attached to today's proxy definitions.
 		current := (cs.ConfigVersion == 0 && req.ConnectionReportIntervalSeconds == 0) || cs.ConfigVersion == conn.ConfigVersion
 		if !current {
@@ -469,10 +473,14 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 		if err := s.Store.DB.Model(&conn).UpdateColumns(updates).Error; err != nil {
 			return err
 		}
-		// Full snapshot: absent proxies and unavailable observations become unknown.
-		if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ?", cs.UUID).
-			UpdateColumns(map[string]any{"observed_status": "unknown", "observed_error": statusError, "observed_at": now}).Error; err != nil {
-			return err
+		// Only a full snapshot can prove that an absent proxy is missing. The
+		// 10-second lightweight report may race frpc reconnect/startup and must
+		// never erase a previously confirmed proxy observation.
+		if !req.ConnectionsOnly {
+			if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ?", cs.UUID).
+				UpdateColumns(map[string]any{"observed_status": "unknown", "observed_error": statusError, "observed_at": now}).Error; err != nil {
+				return err
+			}
 		}
 		if current && available {
 			if err := s.applyProxyStatuses(cs.UUID, cs.ProxyStatuses); err != nil {
@@ -482,7 +490,7 @@ func (s *Service) recordConnectionStatuses(hostUUID string, now time.Time, req p
 			if err := s.Store.DB.Model(&model.ProxyMapping{}).Where("frpc_uuid = ? AND inactive = ? AND observed_status = ?", cs.UUID, false, "unknown").Count(&missing).Error; err != nil {
 				return err
 			}
-			if missing > 0 && (st == "online" || st == "idle") {
+			if !req.ConnectionsOnly && missing > 0 && (st == "online" || st == "idle") {
 				if err := s.Store.DB.Model(&conn).UpdateColumns(map[string]any{"status": "unknown", "status_error": "代理状态不完整"}).Error; err != nil {
 					return err
 				}

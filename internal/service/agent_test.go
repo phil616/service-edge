@@ -91,7 +91,9 @@ func TestConnectionReportsPreserveHostFactsAndRepresentFailures(t *testing.T) {
 		{"running", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true, ProxyStatuses: []protocol.ProxyStatus{{Name: "ssh", Status: "running"}}}, "online"},
 		{"admin error", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, StatusError: "admin: timeout"}, "unknown"},
 		{"proxy failure", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true, ProxyStatuses: []protocol.ProxyStatus{{Name: "ssh", Status: "start error", Err: "port occupied"}}}, "degraded"},
-		{"missing proxy", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true}, "unknown"},
+		// A lightweight report may race a reconnect and return no proxy rows;
+		// retain the last confirmed connection state until a full snapshot.
+		{"missing proxy", protocol.ConnectionStatus{ProcessAlive: true, ProcessStatusAvailable: true, ProxyStatusAvailable: true}, "degraded"},
 		{"process stopped", protocol.ConnectionStatus{ProcessStatusAvailable: true}, "offline"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
