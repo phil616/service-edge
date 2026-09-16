@@ -73,7 +73,7 @@ export default function FRPCDetail() {
             <Descriptions.Item label="UUID"><span className="mono">{data?.uuid}</span></Descriptions.Item>
             <Descriptions.Item label="Agent 状态">{data && <StatusBadge status={data.status} />}</Descriptions.Item>
             <Descriptions.Item label="目标 FRP 版本"><Tag>{data?.frp_version}</Tag></Descriptions.Item>
-            <Descriptions.Item label="目标 / 已应用配置">{data?.config_version} / {data?.runtime?.applied_config_version || '未确认'}</Descriptions.Item>
+            <Descriptions.Item label="目标 / 已应用配置">{data?.config_version} / {data?.runtime?.applied_config_version || (data?.runtime?.last_apply_error ? '未应用（失败）' : '等待首次应用')}</Descriptions.Item>
             {data?.runtime?.last_apply_error && <Descriptions.Item label="配置应用错误">{data.runtime.last_apply_error}</Descriptions.Item>}
             <Descriptions.Item label="最后心跳">
               {data?.last_heartbeat ? dayjs(data.last_heartbeat).format('YYYY-MM-DD HH:mm:ss') : '-'}
